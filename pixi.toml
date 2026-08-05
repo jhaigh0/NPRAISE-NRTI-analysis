@@ -10,6 +10,7 @@ version = "0.1.0"
 [dependencies]
 python = "3.12.*"
 mantidworkbench = ">=6.16.1,<7"
+pre-commit = ">=4.6.1,<5"
 
 [pypi-dependencies]
 endf = { git = "https://github.com/paulromano/endf-python.git" }
