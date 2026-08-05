@@ -1,0 +1,15 @@
+[workspace]
+authors = ["Jonathan Haigh <jonathan.haigh@stfc.ac.uk>"]
+channels = ["conda-forge", "mantid"]
+name = "NPRAISE_project"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = "3.12.*"
+mantidworkbench = ">=6.16.1,<7"
+
+[pypi-dependencies]
+endf = { git = "https://github.com/paulromano/endf-python.git" }
