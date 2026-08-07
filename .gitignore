@@ -1,4 +1,6 @@
 __pycache__/
+endf_database_util/.cache/*
+.vscode/*
 
 # pixi environments
 .pixi/*

@@ -1,0 +1,16 @@
+<html>
+<head>
+<title>Data for Plotting</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<link rel="StyleSheet" href="/css/style.css" type="text/css">
+</head>
+<body>
+<span class='text_s'>
+Li-6(n,tot) ENDFB-8.0<br>
+Energy(eV) XS(b)<br>
+1.00000E-05 47203.4<br>
+1.03125E-05 46482.7<br>
+1.06250E-05 45794.0<br>
+</span>
+</body>
+</html>

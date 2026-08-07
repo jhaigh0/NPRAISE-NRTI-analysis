@@ -15,17 +15,18 @@ def load_and_process(run_no: int, name: str):
     ws = LoadNGEM(Filename=",".join(filenames), OutputWorkspace=name)
     ConvertUnits(InputWorkspace=ws, OutputWorkspace=ws, Target="Energy")
     CropWorkspace(InputWorkspace=ws, OutputWorkspace=ws, XMin=1000, XMax=1000000)
-    Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="100,-0.05,1e+06")
+    Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="100,-0.01,1e+06")
     SumSpectra(InputWorkspace=ws, OutputWorkspace=f"{name}_summed")
     return ws
 
 
 def load_ngem_from_INES_run_number(run_no: int):
     data_dir = Path(
-        f"//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/INES_2024_05/INES{run_no}"
+        f"//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/INES_2025_01/INES{run_no}"
     )
     data_files = data_dir.glob("**/*.edb")
     return [str(f) for f in data_files]
 
 
-load_and_normalise(24981, 24980, "O3_4")
+# load_and_normalise(24981, 24980, "O3_4")
+load_and_process(25047, "03_4")
