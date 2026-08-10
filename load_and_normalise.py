@@ -22,14 +22,16 @@ def load_and_process(run_no: int, name: str):
 
 
 def load_ngem_from_INES_run_number(run_no: int):
-    data_dir = Path(
-        f"//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/INES_2025_01/INES{run_no}"
-    )
-    if platform == 'linux':
+    if platform == 'windows':
+        data_base_dir = Path(
+            f"//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/"
+        )
+    elif platform == 'linux':
         # assumption is we're on idaaas
-        data_dir = Path(f"/home/h1121412/nGEM-data/DATA/INES_2025_01/INES{run_no}")
+        data_base_dir = Path(f"/home/h1121412/nGEM-data/DATA/")
     
-    data_files = data_dir.glob("**/*.edb")
+    run_dir = next(data_base_dir.glob(f"*/INES{run_no}"))
+    data_files = run_dir.glob("**/*.edb")
     return [str(f) for f in data_files]
 
 
