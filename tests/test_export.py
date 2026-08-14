@@ -47,7 +47,7 @@ class MockWorkspace:
         return self._name
 
 
-def make_test_workspace(name: str = "test_ws") -> MockWorkspace:
+def make_test_workspace() -> MockWorkspace:
     """Create a standard test workspace with a 3x2 detector grid and 5 bins.
 
     Detector layout (after reshape to (3, 2)):
@@ -71,17 +71,17 @@ def make_test_workspace(name: str = "test_ws") -> MockWorkspace:
     )
     edges = np.linspace(0, 1, n_bins + 1)
     return MockWorkspace(
-        name, x_pixels, y_pixels, n_bins, detector_ids_flat, counts_2d, edges
+        "test_ws", x_pixels, y_pixels, n_bins, detector_ids_flat, counts_2d, edges
     )
 
 
 class ExportDataTests(unittest.TestCase):
     def test_export_without_roi(self):
         """Export the full workspace without any ROI selection."""
-        ws = make_test_workspace("test_ws_1")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir)
-            npz_path = Path(tmpdir) / "test_ws_1.npz"
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            npz_path = Path(tmp.name)
+            export_data_to_np_format(ws, npz_path)
             self.assertTrue(npz_path.exists())
 
             data = np.load(npz_path)
@@ -113,10 +113,10 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_with_roi_top_row(self):
         """Export with ROI selecting the top row of detectors."""
-        ws = make_test_workspace("test_ws_2")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[101, 102])
-            npz_path = Path(tmpdir) / "test_ws_2.npz"
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            npz_path = Path(tmp.name)
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 102])
             data = np.load(npz_path)
 
             # ROI [101, 102] is at positions (0,0) and (0,1)
@@ -133,10 +133,10 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_with_roi_middle_row(self):
         """Export with ROI selecting the middle row of detectors."""
-        ws = make_test_workspace("test_ws_3")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[103, 104])
-            npz_path = Path(tmpdir) / "test_ws_3.npz"
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            npz_path = Path(tmp.name)
+            export_data_to_np_format(ws, npz_path, det_ids=[103, 104])
             data = np.load(npz_path)
 
             # ROI [103, 104] is at positions (1,0) and (1,1)
@@ -153,10 +153,10 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_with_roi_2x2_block(self):
         """Export with ROI selecting a 2x2 block of detectors."""
-        ws = make_test_workspace("test_ws_4")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[101, 102, 103, 104])
-            npz_path = Path(tmpdir) / "test_ws_4.npz"
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            npz_path = Path(tmp.name)
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 102, 103, 104])
             data = np.load(npz_path)
 
             # ROI [101, 102, 103, 104] forms a 2x2 block at top-left
@@ -183,10 +183,10 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_with_roi_single_detector(self):
         """Export with ROI selecting a single detector."""
-        ws = make_test_workspace("test_ws_5")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[101])
-            npz_path = Path(tmpdir) / "test_ws_5.npz"
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            npz_path = Path(tmp.name)
+            export_data_to_np_format(ws, npz_path, det_ids=[101])
             data = np.load(npz_path)
 
             # Single detector at position (0,0)
@@ -204,10 +204,10 @@ class ExportDataTests(unittest.TestCase):
         rectangular region spanned by the selected detectors, even
         if some of those detectors were not explicitly selected.
         """
-        ws = make_test_workspace("test_ws_6")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[101, 104])
-            npz_path = Path(tmpdir) / "test_ws_6.npz"
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            npz_path = Path(tmp.name)
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 104])
             data = np.load(npz_path)
 
             # det_ids [101, 104] are at positions (0,0) and (1,1)
@@ -235,12 +235,11 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_creates_save_dir(self):
         """Export should create the save directory if it does not exist."""
-        ws = make_test_workspace("test_ws_7")
+        ws = make_test_workspace()
         with tempfile.TemporaryDirectory() as tmpdir:
-            save_dir = Path(tmpdir) / "nested" / "subdir"
-            export_data_to_np_format(ws, save_dir)
-            self.assertTrue(save_dir.exists())
-            npz_path = save_dir / "test_ws_7.npz"
+            npz_path = Path(tmpdir) / "nested" / "subdir" / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path)
+            self.assertTrue(npz_path.parent.exists())
             self.assertTrue(npz_path.exists())
 
     def test_export_filename_uses_workspace_name(self):
@@ -261,19 +260,17 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_with_path_object(self):
         """Export should accept a Path object as save_dir."""
-        ws = make_test_workspace("test_ws_8")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, Path(tmpdir))
-            npz_path = Path(tmpdir) / "test_ws_8.npz"
-            self.assertTrue(npz_path.exists())
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            export_data_to_np_format(ws, Path(tmp.name))
+            self.assertTrue(Path(tmp.name).exists())
 
     def test_export_with_roi_bottom_row(self):
         """Export with ROI selecting the bottom row of detectors."""
-        ws = make_test_workspace("test_ws_9")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[105, 106])
-            npz_path = Path(tmpdir) / "test_ws_9.npz"
-            data = np.load(npz_path)
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            export_data_to_np_format(ws, Path(tmp.name), det_ids=[105, 106])
+            data = np.load(Path(tmp.name))
 
             # ROI [105, 106] is at positions (2,0) and (2,1)
             # Bounding box: rows 2-2, cols 0-1
@@ -289,11 +286,10 @@ class ExportDataTests(unittest.TestCase):
 
     def test_export_with_roi_single_column(self):
         """Export with ROI selecting a single column of detectors."""
-        ws = make_test_workspace("test_ws_10")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir, det_ids=[101, 103, 105])
-            npz_path = Path(tmpdir) / "test_ws_10.npz"
-            data = np.load(npz_path)
+        ws = make_test_workspace()
+        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
+            export_data_to_np_format(ws, Path(tmp.name), det_ids=[101, 103, 105])
+            data = np.load(Path(tmp.name))
 
             # det_ids [101, 103, 105] are at positions (0,0), (1,0), (2,0)
             # Bounding box: rows 0-2, cols 0-0

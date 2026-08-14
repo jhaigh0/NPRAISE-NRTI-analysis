@@ -4,13 +4,13 @@ import numpy as np
 
 
 def export_data_to_np_format(
-    ws, save_dir: str | Path, det_ids: list[int] | None = None
+    ws, filename: str | Path, det_ids: list[int] | None = None
 ):
     """Export data from a workspace to NumPy format (.npz).
 
     Args:
         ws : workspace to be saved
-        save_dir (str | Path): Directory where the .npz file will be saved
+        filename (str | Path): Path where the .npz file will be saved
         det_ids (List[int], optional): Optional list of detector IDs describing a rectangular ROI. If this is provided then just this region will be saved. Defaults to None.
     """
 
@@ -32,11 +32,13 @@ def export_data_to_np_format(
         counts = counts[r0 : r1 + 1, c0 : c1 + 1, :]
 
     edges = ws.readX(0)
-
-    save_dir = Path(save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
+    if filename:
+        filename = Path(filename)
+        filename.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        filename = f"{ws.name()}.npz"
     np.savez_compressed(
-        save_dir / f"{ws.name()}.npz",
+        filename,
         counts=counts,
         detector_ids=detector_ids,
         edges=edges,

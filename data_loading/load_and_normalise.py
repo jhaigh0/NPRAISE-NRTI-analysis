@@ -7,7 +7,7 @@ from mantid.simpleapi import *
 def load_and_normalise(sample_run_no: int, normalise_run_no: int, name: str):
     name = name if name else str(sample_run_no)
     sample_ws = load_and_process(sample_run_no, name)
-    normalise_ws = load_and_process(normalise_run_no, "normalise")
+    normalise_ws = load_and_process(normalise_run_no, f"normalise_{name}")
     Divide(sample_ws, normalise_ws, OutputWorkspace=f"{name}_normalised")
 
 
