@@ -16,7 +16,7 @@ def load_and_process(run_no: int, name: str):
     ws = LoadNGEM(Filename=",".join(filenames), OutputWorkspace=name)
     ConvertUnits(InputWorkspace=ws, OutputWorkspace=ws, Target="Energy")
     CropWorkspace(InputWorkspace=ws, OutputWorkspace=ws, XMin=1000, XMax=1000000)
-    Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="100,-0.01,1e+06")
+    Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="100, -0.005,1e+06")
     ws_summed = SumSpectra(InputWorkspace=ws, OutputWorkspace=f"{name}_summed")
     return ws_summed
 
