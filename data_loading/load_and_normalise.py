@@ -22,9 +22,9 @@ def load_and_process(run_no: int, name: str):
 
 
 def load_ngem_from_INES_run_number(run_no: int):
-    if platform == "windows":
+    if platform.startswith("win"):
         data_base_dir = Path("//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/")
-    elif platform == "linux":
+    elif platform.startswith("linux"):
         # assumption is we're on idaaas
         data_base_dir = Path("/home/h1121412/nGEM-data/DATA/")
 
