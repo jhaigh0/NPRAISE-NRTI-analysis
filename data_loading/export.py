@@ -43,3 +43,14 @@ def export_data_to_np_format(
         detector_ids=detector_ids,
         edges=edges,
     )
+
+
+def get_detIDs_list_from_mask_table(mask_table, row_index: int = 0):
+    ranges = mask_table.row(row_index)["DetectorIDsList"]
+    det_ids = np.concatenate(
+        [
+            np.arange(int(start), int(end) + 1)
+            for start, end in (r.strip().split("-") for r in ranges.split(","))
+        ]
+    )
+    return det_ids.tolist()
