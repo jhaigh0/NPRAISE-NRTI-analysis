@@ -14,7 +14,8 @@ def _combine_workspaces(ws1, ws2, split_index: int, axis: str):
         ws2, DetectorList=",".join(map(str, second_ids)), StoreInADS=False
     )
     second_region_ws = Scale(second_region_ws, factor, StoreInADS=False)
-    return AppendSpectra(first_region_ws, second_region_ws)
+    result = AppendSpectra(first_region_ws, second_region_ws)
+    return result
 
 
 def combine_workspaces_vertical_split(ws1, ws2, split_index: int):
