@@ -21,8 +21,8 @@ def export_data_to_np_format(
     detid_to_wsi = ws.getDetectorIDToWorkspaceIndexMap(True, True)
     detector_ids = np.array(
         [det_id for det_id, _ in sorted(detid_to_wsi.items(), key=lambda item: item[1])]
-    ).reshape(x, y)
-    counts = ws.extractY().reshape(x, y, nBins)
+    ).reshape(y, x)
+    counts = ws.extractY().reshape(y, x, nBins)
     if det_ids is not None:
         mask = np.isin(detector_ids, det_ids)
         rows, cols = np.where(mask)

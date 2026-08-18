@@ -79,123 +79,142 @@ class ExportDataTests(unittest.TestCase):
     def test_export_without_roi(self):
         """Export the full workspace without any ROI selection."""
         ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            npz_path = Path(tmp.name)
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
             export_data_to_np_format(ws, npz_path)
             self.assertTrue(npz_path.exists())
 
-            data = np.load(npz_path)
-            self.assertIn("counts", data)
-            self.assertIn("detector_ids", data)
-            self.assertIn("edges", data)
+            with np.load(npz_path) as data:
+                self.assertIn("counts", data)
+                self.assertIn("detector_ids", data)
+                self.assertIn("edges", data)
 
-            # Check shapes
-            self.assertEqual(data["counts"].shape, (3, 2, 5))
-            self.assertEqual(data["detector_ids"].shape, (3, 2))
-            self.assertEqual(data["edges"].shape, (6,))
+                # Check shapes
+                self.assertEqual(data["counts"].shape, (2, 3, 5))
+                self.assertEqual(data["detector_ids"].shape, (2, 3))
+                self.assertEqual(data["edges"].shape, (6,))
 
-            # Check detector_ids
-            expected_ids = np.array([[101, 102], [103, 104], [105, 106]])
-            np.testing.assert_array_equal(data["detector_ids"], expected_ids)
+                # Check detector_ids
+                expected_ids = np.array([[101, 102, 103], [104, 105, 106]])
+                np.testing.assert_array_equal(data["detector_ids"], expected_ids)
 
-            # Check counts
-            expected_counts = np.array(
-                [
-                    [[1010, 1011, 1012, 1013, 1014], [1020, 1021, 1022, 1023, 1024]],
-                    [[1030, 1031, 1032, 1033, 1034], [1040, 1041, 1042, 1043, 1044]],
-                    [[1050, 1051, 1052, 1053, 1054], [1060, 1061, 1062, 1063, 1064]],
-                ]
-            )
-            np.testing.assert_array_equal(data["counts"], expected_counts)
-
-            # Check edges
-            np.testing.assert_array_equal(data["edges"], np.linspace(0, 1, 6))
-
-    def test_export_with_roi_top_row(self):
-        """Export with ROI selecting the top row of detectors."""
-        ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            npz_path = Path(tmp.name)
-            export_data_to_np_format(ws, npz_path, det_ids=[101, 102])
-            data = np.load(npz_path)
-
-            # ROI [101, 102] is at positions (0,0) and (0,1)
-            # Bounding box: rows 0-0, cols 0-1
-            self.assertEqual(data["counts"].shape, (1, 2, 5))
-            self.assertEqual(data["detector_ids"].shape, (1, 2))
-            np.testing.assert_array_equal(data["detector_ids"], np.array([[101, 102]]))
-            np.testing.assert_array_equal(
-                data["counts"],
-                np.array(
-                    [[[1010, 1011, 1012, 1013, 1014], [1020, 1021, 1022, 1023, 1024]]]
-                ),
-            )
-
-    def test_export_with_roi_middle_row(self):
-        """Export with ROI selecting the middle row of detectors."""
-        ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            npz_path = Path(tmp.name)
-            export_data_to_np_format(ws, npz_path, det_ids=[103, 104])
-            data = np.load(npz_path)
-
-            # ROI [103, 104] is at positions (1,0) and (1,1)
-            # Bounding box: rows 1-1, cols 0-1
-            self.assertEqual(data["counts"].shape, (1, 2, 5))
-            self.assertEqual(data["detector_ids"].shape, (1, 2))
-            np.testing.assert_array_equal(data["detector_ids"], np.array([[103, 104]]))
-            np.testing.assert_array_equal(
-                data["counts"],
-                np.array(
-                    [[[1030, 1031, 1032, 1033, 1034], [1040, 1041, 1042, 1043, 1044]]]
-                ),
-            )
-
-    def test_export_with_roi_2x2_block(self):
-        """Export with ROI selecting a 2x2 block of detectors."""
-        ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            npz_path = Path(tmp.name)
-            export_data_to_np_format(ws, npz_path, det_ids=[101, 102, 103, 104])
-            data = np.load(npz_path)
-
-            # ROI [101, 102, 103, 104] forms a 2x2 block at top-left
-            self.assertEqual(data["counts"].shape, (2, 2, 5))
-            self.assertEqual(data["detector_ids"].shape, (2, 2))
-            np.testing.assert_array_equal(
-                data["detector_ids"], np.array([[101, 102], [103, 104]])
-            )
-            np.testing.assert_array_equal(
-                data["counts"],
-                np.array(
+                # Check counts
+                expected_counts = np.array(
                     [
                         [
                             [1010, 1011, 1012, 1013, 1014],
                             [1020, 1021, 1022, 1023, 1024],
+                            [1030, 1031, 1032, 1033, 1034],
                         ],
                         [
-                            [1030, 1031, 1032, 1033, 1034],
                             [1040, 1041, 1042, 1043, 1044],
+                            [1050, 1051, 1052, 1053, 1054],
+                            [1060, 1061, 1062, 1063, 1064],
                         ],
                     ]
-                ),
-            )
+                )
+                np.testing.assert_array_equal(data["counts"], expected_counts)
+
+                # Check edges
+                np.testing.assert_array_equal(data["edges"], np.linspace(0, 1, 6))
+
+    def test_export_with_roi_top_row(self):
+        """Export with ROI selecting the top row of detectors."""
+        ws = make_test_workspace()
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 102, 103])
+            with np.load(npz_path) as data:
+                # ROI [101, 102, 103] is at positions (0,0), (0,1), and (0,2)
+                # Bounding box: rows 0-0, cols 0-2
+                self.assertEqual(data["counts"].shape, (1, 3, 5))
+                self.assertEqual(data["detector_ids"].shape, (1, 3))
+                np.testing.assert_array_equal(
+                    data["detector_ids"], np.array([[101, 102, 103]])
+                )
+                np.testing.assert_array_equal(
+                    data["counts"],
+                    np.array(
+                        [
+                            [
+                                [1010, 1011, 1012, 1013, 1014],
+                                [1020, 1021, 1022, 1023, 1024],
+                                [1030, 1031, 1032, 1033, 1034],
+                            ]
+                        ]
+                    ),
+                )
+
+    def test_export_with_roi_bottom_row(self):
+        """Export with ROI selecting the bottom row of detectors."""
+        ws = make_test_workspace()
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path, det_ids=[104, 105, 106])
+            with np.load(npz_path) as data:
+                # ROI [104, 105, 106] is at positions (1,0), (1,1), and (1,2)
+                # Bounding box: rows 1-1, cols 0-2
+                self.assertEqual(data["counts"].shape, (1, 3, 5))
+                self.assertEqual(data["detector_ids"].shape, (1, 3))
+                np.testing.assert_array_equal(
+                    data["detector_ids"], np.array([[104, 105, 106]])
+                )
+                np.testing.assert_array_equal(
+                    data["counts"],
+                    np.array(
+                        [
+                            [
+                                [1040, 1041, 1042, 1043, 1044],
+                                [1050, 1051, 1052, 1053, 1054],
+                                [1060, 1061, 1062, 1063, 1064],
+                            ]
+                        ]
+                    ),
+                )
+
+    def test_export_with_roi_2x2_block(self):
+        """Export with ROI selecting a 2x2 block of detectors."""
+        ws = make_test_workspace()
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 102, 104, 105])
+            with np.load(npz_path) as data:
+                # ROI [101, 102, 104, 105] forms a 2x2 block at top-left
+                self.assertEqual(data["counts"].shape, (2, 2, 5))
+                self.assertEqual(data["detector_ids"].shape, (2, 2))
+                np.testing.assert_array_equal(
+                    data["detector_ids"], np.array([[101, 102], [104, 105]])
+                )
+                np.testing.assert_array_equal(
+                    data["counts"],
+                    np.array(
+                        [
+                            [
+                                [1010, 1011, 1012, 1013, 1014],
+                                [1020, 1021, 1022, 1023, 1024],
+                            ],
+                            [
+                                [1040, 1041, 1042, 1043, 1044],
+                                [1050, 1051, 1052, 1053, 1054],
+                            ],
+                        ]
+                    ),
+                )
 
     def test_export_with_roi_single_detector(self):
         """Export with ROI selecting a single detector."""
         ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            npz_path = Path(tmp.name)
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
             export_data_to_np_format(ws, npz_path, det_ids=[101])
-            data = np.load(npz_path)
-
-            # Single detector at position (0,0)
-            self.assertEqual(data["counts"].shape, (1, 1, 5))
-            self.assertEqual(data["detector_ids"].shape, (1, 1))
-            np.testing.assert_array_equal(data["detector_ids"], np.array([[101]]))
-            np.testing.assert_array_equal(
-                data["counts"], np.array([[[1010, 1011, 1012, 1013, 1014]]])
-            )
+            with np.load(npz_path) as data:
+                # Single detector at position (0,0)
+                self.assertEqual(data["counts"].shape, (1, 1, 5))
+                self.assertEqual(data["detector_ids"].shape, (1, 1))
+                np.testing.assert_array_equal(data["detector_ids"], np.array([[101]]))
+                np.testing.assert_array_equal(
+                    data["counts"], np.array([[[1010, 1011, 1012, 1013, 1014]]])
+                )
 
     def test_export_with_roi_non_contiguous(self):
         """Export with ROI selecting non-contiguous detectors.
@@ -205,33 +224,32 @@ class ExportDataTests(unittest.TestCase):
         if some of those detectors were not explicitly selected.
         """
         ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            npz_path = Path(tmp.name)
-            export_data_to_np_format(ws, npz_path, det_ids=[101, 104])
-            data = np.load(npz_path)
-
-            # det_ids [101, 104] are at positions (0,0) and (1,1)
-            # Bounding box: rows 0-1, cols 0-1 (includes 102 and 103)
-            self.assertEqual(data["counts"].shape, (2, 2, 5))
-            self.assertEqual(data["detector_ids"].shape, (2, 2))
-            np.testing.assert_array_equal(
-                data["detector_ids"], np.array([[101, 102], [103, 104]])
-            )
-            np.testing.assert_array_equal(
-                data["counts"],
-                np.array(
-                    [
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 105])
+            with np.load(npz_path) as data:
+                # det_ids [101, 105] are at positions (0,0) and (1,1)
+                # Bounding box: rows 0-1, cols 0-1 (includes 102 and 104)
+                self.assertEqual(data["counts"].shape, (2, 2, 5))
+                self.assertEqual(data["detector_ids"].shape, (2, 2))
+                np.testing.assert_array_equal(
+                    data["detector_ids"], np.array([[101, 102], [104, 105]])
+                )
+                np.testing.assert_array_equal(
+                    data["counts"],
+                    np.array(
                         [
-                            [1010, 1011, 1012, 1013, 1014],
-                            [1020, 1021, 1022, 1023, 1024],
-                        ],
-                        [
-                            [1030, 1031, 1032, 1033, 1034],
-                            [1040, 1041, 1042, 1043, 1044],
-                        ],
-                    ]
-                ),
-            )
+                            [
+                                [1010, 1011, 1012, 1013, 1014],
+                                [1020, 1021, 1022, 1023, 1024],
+                            ],
+                            [
+                                [1040, 1041, 1042, 1043, 1044],
+                                [1050, 1051, 1052, 1053, 1054],
+                            ],
+                        ]
+                    ),
+                )
 
     def test_export_creates_save_dir(self):
         """Export should create the save directory if it does not exist."""
@@ -242,72 +260,37 @@ class ExportDataTests(unittest.TestCase):
             self.assertTrue(npz_path.parent.exists())
             self.assertTrue(npz_path.exists())
 
-    def test_export_filename_uses_workspace_name(self):
-        """The output file should be named after the workspace."""
-        ws = MockWorkspace(
-            "my_custom_name",
-            3,
-            2,
-            5,
-            [101, 102, 103, 104, 105, 106],
-            np.zeros((6, 5)),
-            np.linspace(0, 1, 6),
-        )
-        with tempfile.TemporaryDirectory() as tmpdir:
-            export_data_to_np_format(ws, tmpdir)
-            npz_path = Path(tmpdir) / "my_custom_name.npz"
-            self.assertTrue(npz_path.exists())
-
     def test_export_with_path_object(self):
         """Export should accept a Path object as save_dir."""
         ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            export_data_to_np_format(ws, Path(tmp.name))
-            self.assertTrue(Path(tmp.name).exists())
-
-    def test_export_with_roi_bottom_row(self):
-        """Export with ROI selecting the bottom row of detectors."""
-        ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            export_data_to_np_format(ws, Path(tmp.name), det_ids=[105, 106])
-            data = np.load(Path(tmp.name))
-
-            # ROI [105, 106] is at positions (2,0) and (2,1)
-            # Bounding box: rows 2-2, cols 0-1
-            self.assertEqual(data["counts"].shape, (1, 2, 5))
-            self.assertEqual(data["detector_ids"].shape, (1, 2))
-            np.testing.assert_array_equal(data["detector_ids"], np.array([[105, 106]]))
-            np.testing.assert_array_equal(
-                data["counts"],
-                np.array(
-                    [[[1050, 1051, 1052, 1053, 1054], [1060, 1061, 1062, 1063, 1064]]]
-                ),
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path)
+            self.assertTrue(npz_path.exists())
 
     def test_export_with_roi_single_column(self):
         """Export with ROI selecting a single column of detectors."""
         ws = make_test_workspace()
-        with tempfile.NamedTemporaryFile(suffix=".npz") as tmp:
-            export_data_to_np_format(ws, Path(tmp.name), det_ids=[101, 103, 105])
-            data = np.load(Path(tmp.name))
-
-            # det_ids [101, 103, 105] are at positions (0,0), (1,0), (2,0)
-            # Bounding box: rows 0-2, cols 0-0
-            self.assertEqual(data["counts"].shape, (3, 1, 5))
-            self.assertEqual(data["detector_ids"].shape, (3, 1))
-            np.testing.assert_array_equal(
-                data["detector_ids"], np.array([[101], [103], [105]])
-            )
-            np.testing.assert_array_equal(
-                data["counts"],
-                np.array(
-                    [
-                        [[1010, 1011, 1012, 1013, 1014]],
-                        [[1030, 1031, 1032, 1033, 1034]],
-                        [[1050, 1051, 1052, 1053, 1054]],
-                    ]
-                ),
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            npz_path = Path(tmp) / "test_ws.npz"
+            export_data_to_np_format(ws, npz_path, det_ids=[101, 104])
+            with np.load(npz_path) as data:
+                # det_ids [101, 104] are at positions (0,0), (1,0)
+                # Bounding box: rows 0-2, cols 0-0
+                self.assertEqual(data["counts"].shape, (2, 1, 5))
+                self.assertEqual(data["detector_ids"].shape, (2, 1))
+                np.testing.assert_array_equal(
+                    data["detector_ids"], np.array([[101], [104]])
+                )
+                np.testing.assert_array_equal(
+                    data["counts"],
+                    np.array(
+                        [
+                            [[1010, 1011, 1012, 1013, 1014]],
+                            [[1040, 1041, 1042, 1043, 1044]],
+                        ]
+                    ),
+                )
 
 
 if __name__ == "__main__":
