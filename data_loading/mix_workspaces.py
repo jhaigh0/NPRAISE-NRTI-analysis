@@ -1,5 +1,5 @@
 import numpy as np
-from mantid.simpleapi import AppendSpectra, ExtractSpectra, Scale
+from mantid.simpleapi import AppendSpectra, CreateWorkspace, ExtractSpectra, Scale
 
 
 def _combine_workspaces(ws1, ws2, split_index: int, axis: str):
@@ -51,3 +51,16 @@ def get_grid_dimensions(ws):
     ncols = main_bank.xpixels()
     nrows = main_bank.ypixels()
     return nrows, ncols
+
+
+def scaled_merge(ws1, ws2, scale_mask):
+    ws1_y = ws1.extractY()
+    ws2_y = ws2.extractY()
+    mixed_y = scale_mask[:, None] * ws1_y + (1 - scale_mask[:, None]) * ws2_y
+    merged_ws = CreateWorkspace(
+        DataX=ws1.readX(0),
+        DataY=mixed_y,
+        ParentWorkspace=ws1,
+        OutputWorkspace="merged_ws",
+    )
+    return merged_ws
