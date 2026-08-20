@@ -59,7 +59,9 @@ def scaled_merge(ws1, ws2, scale_mask):
     mixed_y = scale_mask[:, None] * ws1_y + (1 - scale_mask[:, None]) * ws2_y
     merged_ws = CreateWorkspace(
         DataX=ws1.readX(0),
-        DataY=mixed_y,
+        DataY=mixed_y.ravel(),
+        Nspec=ws1.getNumberHistograms(),
+        UnitX=ws1.getAxis(0).getUnit().name(),
         ParentWorkspace=ws1,
         OutputWorkspace="merged_ws",
     )
