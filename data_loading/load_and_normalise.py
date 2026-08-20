@@ -31,3 +31,20 @@ def load_ngem_from_INES_run_number(run_no: int):
     run_dir = next(data_base_dir.glob(f"*/INES{run_no}"))
     data_files = run_dir.glob("**/*.edb")
     return [str(f) for f in data_files]
+
+
+def create_smooth_normalisation_workspace(ws):
+    y_data = np.nan_to_num(ws.extractY(), nan=0.0)
+    summed_spectrum = np.sum(y_data, axis=0)
+    spectra_totals = np.sum(y_data, axis=1)
+    summed_norm = summed_spectrum / np.sum(summed_spectrum)
+    new_y = spectra_totals[:, np.newaxis] * summed_norm[np.newaxis, :]
+    new_ws = CreateWorkspace(
+        DataX=ws.readX(0),
+        DataY=new_y.ravel(),
+        NSpec=ws.getNumberHistograms(),
+        UnitX=ws.getAxis(0).getUnit().name(),
+        ParentWorkspace=ws,
+        OutputWorkspace=f"{ws.name()}_smoothed",
+    )
+    return new_ws
