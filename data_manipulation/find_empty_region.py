@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.decomposition import PCA
 
 
 def generate_threshhold_mask_percentage(ws, threshold: float):
@@ -22,3 +23,10 @@ def generate_threshhold_mask_absolute(ws, threshold: float):
     )
     mask = (int_counts >= threshold).astype(float)
     return mask
+
+
+def perform_pca_on_workspace(ws):
+    pca = PCA()
+    y_data = np.nan_to_num(ws.extractY(), nan=0.0)
+    scores = pca.fit_transform(y_data)
+    return scores, pca
