@@ -219,6 +219,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/quasielasticbayes-0.3.0-py312hfc6b132_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/rapidjson-1.1.0.post20250205-h54a6638_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-1.9.0-np2py312h3226591_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/scipy-1.16.3-py312h54fa4ab_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/sip-6.7.12-py312h30efb56_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/snappy-1.2.2-h03e3b7b_1.conda
@@ -315,6 +316,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.2.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/narwhals-2.25.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nest-asyncio2-1.7.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nodeenv-1.10.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/orsopy-1.2.1-pyhd8ed1ab_1.conda
@@ -425,6 +427,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.2.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/narwhals-2.25.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nest-asyncio2-1.7.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nodeenv-1.10.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/orsopy-1.2.1-pyhd8ed1ab_1.conda
@@ -623,6 +626,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/qt6-main-6.9.2-ha0de62e_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/quasielasticbayes-0.3.0-py312h7e22eef_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/rapidjson-1.1.0.post20250205-h5112557_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/scikit-learn-1.9.0-np2py312hea30aaf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/scipy-1.16.3-py312h9b3c559_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/sdl2-2.32.56-h5112557_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/sdl3-3.4.14-h5112557_0.conda
@@ -4181,6 +4185,29 @@ packages:
     - readline >=8.3,<9.0a0
   size: 345073
   timestamp: 1765813471974
+- conda: https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-1.9.0-np2py312h3226591_0.conda
+  sha256: 8c0cd0326b5a17ddcf189fc4f119bf6871b7853595c088075847c484a3ed567e
+  md5: e6e9b5795bb495325c3b4ebd451519aa
+  depends:
+  - python
+  - numpy >=1.24.1
+  - scipy >=1.10.0
+  - joblib >=1.4.0
+  - threadpoolctl >=3.5.0
+  - narwhals >=2.0.1
+  - libgcc >=14
+  - _openmp_mutex >=4.5
+  - __glibc >=2.17,<3.0.a0
+  - libstdcxx >=14
+  - numpy >=1.23,<3
+  - python_abi 3.12.* *_cp312
+  license: BSD-3-Clause
+  license_family: BSD
+  purls:
+  - pkg:pypi/scikit-learn?source=hash-mapping
+  run_exports: {}
+  size: 10038167
+  timestamp: 1780401052981
 - conda: https://conda.anaconda.org/conda-forge/linux-64/scipy-1.16.3-py312h54fa4ab_2.conda
   sha256: 2f73242ca3164b4f305becb535a8245ff25839a42d4e62b222f866a5bf58b989
   md5: e82683871cbc4bb257b7694f31a91327
@@ -5732,6 +5759,18 @@ packages:
   run_exports: {}
   size: 15851
   timestamp: 1749895533014
+- conda: https://conda.anaconda.org/conda-forge/noarch/narwhals-2.25.0-pyhcf101f3_0.conda
+  sha256: e48d972fae8e32ca43eefd1a9649afa3a82b4dda5fe12caa441f0bc9e8d1938d
+  md5: 0117bf65e45c951a9b0004172cfaeef6
+  depends:
+  - python >=3.10
+  - python
+  license: MIT
+  purls:
+  - pkg:pypi/narwhals?source=compressed-mapping
+  run_exports: {}
+  size: 293989
+  timestamp: 1787261063562
 - conda: https://conda.anaconda.org/conda-forge/noarch/nest-asyncio2-1.7.2-pyhcf101f3_0.conda
   sha256: e6768ceef038f4d7e083de7e393f5dd7d672b937e2bda570b740f6399b686689
   md5: fcd832bfd4749e9b246112b6894f97fc
@@ -9004,6 +9043,28 @@ packages:
   run_exports: {}
   size: 153975
   timestamp: 1784885341946
+- conda: https://conda.anaconda.org/conda-forge/win-64/scikit-learn-1.9.0-np2py312hea30aaf_0.conda
+  sha256: c89cfc61bd6c690154ff7a7c9029b9dd83aae1049dc1f84c25c37cafa0b5f69d
+  md5: 0637562978d4231902754645e4c28640
+  depends:
+  - python
+  - numpy >=1.24.1
+  - scipy >=1.10.0
+  - joblib >=1.4.0
+  - threadpoolctl >=3.5.0
+  - narwhals >=2.0.1
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  - ucrt >=10.0.20348.0
+  - numpy >=1.23,<3
+  - python_abi 3.12.* *_cp312
+  license: BSD-3-Clause
+  license_family: BSD
+  purls:
+  - pkg:pypi/scikit-learn?source=hash-mapping
+  run_exports: {}
+  size: 9153589
+  timestamp: 1780413519467
 - conda: https://conda.anaconda.org/conda-forge/win-64/scipy-1.16.3-py312h9b3c559_2.conda
   sha256: 15272cd1fea6688be417c32d99b9c7d92b89bb01365fcd8a52185fcbdcd70786
   md5: d6ef9dade2ca0a46dad8443566af7447
