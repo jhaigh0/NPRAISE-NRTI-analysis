@@ -13,6 +13,7 @@ mantidworkbench = ">=6.16.1,<7"
 pre-commit = ">=4.6.1,<5"
 periodictable = ">=1.7.1,<2"
 scikit-learn = ">=1.9.0,<2"
+pywavelets = ">=1.9.0,<2"
 
 [pypi-dependencies]
 endf = { git = "https://github.com/paulromano/endf-python.git" }
