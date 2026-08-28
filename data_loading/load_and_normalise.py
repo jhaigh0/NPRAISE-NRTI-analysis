@@ -4,24 +4,33 @@ from sys import platform
 from mantid.simpleapi import *
 
 
-def load_and_normalise(sample_run_no: int, normalise_run_no: int, name: str):
+def load_and_normalise(
+    sample_run_no: int,
+    normalise_run_no: int,
+    name: str,
+    smooth_normalisation: bool = False,
+):
     name = name if name else str(sample_run_no)
     sample_ws = load_and_process(sample_run_no, name)
     normalise_ws = load_and_process(normalise_run_no, f"normalise_{name}")
+    if smooth_normalisation:
+        normalise_ws = create_smooth_normalisation_workspace(normalise_ws)
     Divide(sample_ws, normalise_ws, OutputWorkspace=f"{name}_normalised")
+    SumSpectra(
+        InputWorkspace=f"{name}_normalised", OutputWorkspace=f"{name}_normalised_summed"
+    )
 
 
 def load_and_process(run_no: int, name: str):
-    filenames = load_ngem_from_INES_run_number(run_no)
+    filenames = get_ngem_from_INES_run_number(run_no)
     ws = LoadNGEM(Filename=",".join(filenames), OutputWorkspace=name)
     ConvertUnits(InputWorkspace=ws, OutputWorkspace=ws, Target="Energy")
     CropWorkspace(InputWorkspace=ws, OutputWorkspace=ws, XMin=1000, XMax=1000000)
     Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="100, -0.005,1e+06")
-    ws_summed = SumSpectra(InputWorkspace=ws, OutputWorkspace=f"{name}_summed")
-    return ws_summed
+    return ws
 
 
-def load_ngem_from_INES_run_number(run_no: int):
+def get_ngem_from_INES_run_number(run_no: int):
     if platform.startswith("win"):
         data_base_dir = Path("//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/")
     elif platform.startswith("linux"):
