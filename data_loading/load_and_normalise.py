@@ -63,3 +63,22 @@ def create_smooth_normalisation_workspace(ws):
         OutputWorkspace=f"{ws.name()}_smoothed",
     )
     return new_ws
+
+
+def normalise_via_empty_region_mask(ws, mask_array):
+    y_data = np.nan_to_num(ws.extractY(), nan=0.0)
+    new_y = np.copy(y_data)
+    empty_region_y_data = y_data[mask_array, :]
+    sample_region_y_data = y_data[~mask_array, :]
+    empty_region_spectrum = np.sum(empty_region_y_data, axis=0) / np.sum(mask_array)
+    sample_region_y_data /= empty_region_spectrum[np.newaxis, :]
+    new_y[~mask_array, :] = np.nan_to_num(sample_region_y_data, nan=0.0)
+    new_ws = CreateWorkspace(
+        DataX=ws.readX(0),
+        DataY=new_y.ravel(),
+        NSpec=ws.getNumberHistograms(),
+        UnitX=ws.getAxis(0).getUnit().name(),
+        ParentWorkspace=ws,
+        OutputWorkspace=f"{ws.name()}_normalised_by_mask",
+    )
+    return new_ws

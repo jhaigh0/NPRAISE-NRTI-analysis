@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.decomposition import PCA
+from sklearn.decomposition import NMF, PCA
 
 from data_manipulation.mix_workspaces import get_grid_dimensions
 
@@ -31,7 +31,17 @@ def perform_pca_on_workspace(ws, n_components):
     pca = PCA(n_components=n_components)
     y_data = np.nan_to_num(ws.extractY(), nan=0.0)
     scores = pca.fit_transform(y_data)
-    return scores, pca
+    components = pca.components_
+    return scores, components
+
+
+def perform_nmf_on_workspace(ws, n_components, mask_limit=0.0):
+    nmf = NMF(n_components=n_components, init="nndsvda", random_state=0)
+    y_data = np.nan_to_num(ws.extractY(), nan=0.0)
+    W = nmf.fit_transform(y_data)
+    H = nmf.components_
+    background_mask = np.max(W, axis=1) <= mask_limit
+    return W, H, background_mask
 
 
 def get_dimensions_of_roi_workspace(ws):
