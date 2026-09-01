@@ -16,6 +16,12 @@ def load_and_normalise(
     if smooth_normalisation:
         normalise_ws = create_smooth_normalisation_workspace(normalise_ws)
     Divide(sample_ws, normalise_ws, OutputWorkspace=f"{name}_normalised")
+    ReplaceSpecialValues(
+        InputWorkspace=f"{name}_normalised",
+        NanValue=0.0,
+        InfinityValue=0.0,
+        OutputWorkspace=f"{name}_normalised",
+    )
     SumSpectra(
         InputWorkspace=f"{name}_normalised", OutputWorkspace=f"{name}_normalised_summed"
     )
