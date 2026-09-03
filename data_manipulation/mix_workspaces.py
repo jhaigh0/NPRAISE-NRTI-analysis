@@ -66,3 +66,18 @@ def scaled_merge(ws1, ws2, scale_mask):
         OutputWorkspace="merged_ws",
     )
     return merged_ws
+
+
+def mix_random_samples_from_workspace_indexes(ws, indexes, n_sets):
+    n_samples = len(indexes) // n_sets
+    sampled_index_sets = np.random.choice(
+        indexes, size=(n_sets, n_samples), replace=False
+    )
+    y_data = ws.extractY()
+    sampled_spectra_sets = [
+        y_data[sampled_indexes] for sampled_indexes in sampled_index_sets
+    ]
+    summed_spectra_sets = [
+        np.sum(sampled_spectra, axis=0) for sampled_spectra in sampled_spectra_sets
+    ]
+    return summed_spectra_sets

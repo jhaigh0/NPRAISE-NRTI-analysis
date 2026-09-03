@@ -44,6 +44,13 @@ def perform_nmf_on_workspace(ws, n_components, mask_limit=0.0):
     return W, H, background_mask
 
 
+def get_workspace_indexes_from_W_array(W, min_score=0.0):
+    masks = W > min_score
+    x, y = np.where(masks)
+    indices_by_column = [x[y == i] for i in range(masks.shape[1])]
+    return indices_by_column
+
+
 def get_dimensions_of_roi_workspace(ws):
     nrows, ncols = get_grid_dimensions(ws)
     all_detectors = np.arange(1, nrows * ncols + 1).reshape(nrows, ncols)
