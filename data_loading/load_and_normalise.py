@@ -32,7 +32,7 @@ def load_and_process(run_no: int, name: str):
     ws = LoadNGEM(Filename=",".join(filenames), OutputWorkspace=name)
     ConvertUnits(InputWorkspace=ws, OutputWorkspace=ws, Target="Energy")
     CropWorkspace(InputWorkspace=ws, OutputWorkspace=ws, XMin=1000, XMax=1000000)
-    Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="100, -0.005,1e+06")
+    Rebin(InputWorkspace=ws, OutputWorkspace=ws, Params="1000,-0.005,1e+06")
     return ws
 
 
@@ -82,3 +82,17 @@ def normalise_via_empty_region_mask(ws, mask_array):
         OutputWorkspace=f"{ws.name()}_normalised_by_mask",
     )
     return new_ws
+
+
+def find_first_non_zero_bin(ws):
+    y_data = np.nan_to_num(ws.extractY(), nan=0.0)
+    first_non_zero_index = np.any(y_data != 0, axis=0).argmax()
+    return first_non_zero_index
+
+
+def crop_workspace_to_first_non_zero_bin(ws):
+    first_non_zero_index = find_first_non_zero_bin(ws)
+    CropWorkspace(
+        InputWorkspace=ws, OutputWorkspace=ws, StartWorkspaceIndex=first_non_zero_index
+    )
+    return ws
