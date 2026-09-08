@@ -14,6 +14,9 @@ pre-commit = ">=4.6.1,<5"
 periodictable = ">=1.7.1,<2"
 scikit-learn = ">=1.9.0,<2"
 pywavelets = ">=1.9.0,<2"
+scikit-image = ">=0.26.0,<0.27"
+joblib = ">=1.6.0,<2"
+pandas = ">=3.0.5,<4"
 
 [pypi-dependencies]
 endf = { git = "https://github.com/paulromano/endf-python.git" }
