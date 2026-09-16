@@ -40,15 +40,9 @@ def perform_nmf_on_workspace(ws, n_components, mask_limit=0.0):
     y_data = np.nan_to_num(ws.extractY(), nan=0.0)
     W = nmf.fit_transform(y_data)
     H = nmf.components_
+    reconstruction_error = nmf.reconstruction_err_
     background_mask = np.max(W, axis=1) <= mask_limit
-    return W, H, background_mask
-
-
-def get_workspace_indexes_from_W_array(W, min_score=0.0):
-    masks = W > min_score
-    x, y = np.where(masks)
-    indices_by_column = [x[y == i] for i in range(masks.shape[1])]
-    return indices_by_column
+    return W, H, reconstruction_error, background_mask
 
 
 def get_dimensions_of_roi_workspace(ws):
