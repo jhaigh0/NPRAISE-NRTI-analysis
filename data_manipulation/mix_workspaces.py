@@ -68,7 +68,9 @@ def scaled_merge(ws1, ws2, scale_mask):
     return merged_ws
 
 
-def mix_random_samples_from_workspace_indexes(ws, indexes, n_sets, noise_level=0.0):
+def mix_random_samples_from_workspace_indexes(
+    ws, indexes, n_sets, noise_level=0.0, normalise: bool = False
+):
     n_samples = len(indexes) // n_sets
     unselected_indexes = np.delete(
         np.arange(ws.getNumberHistograms()), np.array(indexes)
@@ -79,6 +81,34 @@ def mix_random_samples_from_workspace_indexes(ws, indexes, n_sets, noise_level=0
     n_noise_samples = int(noise_level * n_samples)
     sampled_noise_sets = np.random.choice(
         unselected_indexes, size=(n_sets, n_noise_samples), replace=False
+    )
+    sampled_index_sets = np.append(sampled_index_sets, sampled_noise_sets, axis=1)
+    y_data = ws.extractY()
+    sampled_spectra_sets = [
+        y_data[sampled_indexes] for sampled_indexes in sampled_index_sets
+    ]
+    summed_spectra_sets = [
+        np.sum(sampled_spectra, axis=0) for sampled_spectra in sampled_spectra_sets
+    ]
+
+    if normalise:
+        n_samples_total = n_samples + n_noise_samples
+        summed_spectra_sets = [
+            spectrum / n_samples_total for spectrum in summed_spectra_sets
+        ]
+
+    return summed_spectra_sets
+
+
+def mix_random_samples_from_W_weights(ws, W_i, n_sets, n_samples=20, noise_level=0.0):
+    sampled_index_sets = np.random.choice(
+        W_i, size=(n_sets, n_samples), p=W_i / np.sum(W_i)
+    )
+    n_noise_samples = int(noise_level * n_samples)
+    sampled_noise_sets = np.random.choice(
+        W_i,
+        size=(n_sets, n_noise_samples),
+        p=(W_i.max() - W_i) / np.sum(W_i.max() - W_i),
     )
     sampled_index_sets = np.append(sampled_index_sets, sampled_noise_sets, axis=1)
     y_data = ws.extractY()

@@ -54,3 +54,25 @@ def get_detIDs_list_from_mask_table(mask_table, row_index: int = 0):
         ]
     )
     return det_ids.tolist()
+
+
+def save_sampled_data_to_np_format(
+    spectra,
+    x_bins,
+    filename: str | Path,
+):
+    """Save sampled spectra to a .npz file.
+
+    Args:
+        spectra: List of sampled spectra (NumPy arrays).
+        x_bins: The x-axis bin edges corresponding to the spectra.
+        filename (str | Path): Path where the .npz file will be saved.
+    """
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True)
+
+    np.savez_compressed(
+        filename,
+        spectra_samples=np.array(spectra),
+        x_bins=x_bins,
+    )
