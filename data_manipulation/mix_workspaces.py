@@ -69,18 +69,25 @@ def scaled_merge(ws1, ws2, scale_mask):
 
 
 def mix_random_samples_from_workspace_indexes(
-    ws, indexes, n_sets, noise_level=0.0, normalise: bool = False
+    ws,
+    indexes,
+    n_sets,
+    n_samples,
+    noise_level=0.0,
+    replace: bool = False,
+    normalise: bool = False,
 ):
-    n_samples = len(indexes) // n_sets
+    if not replace:
+        n_samples = len(indexes) // n_sets
     unselected_indexes = np.delete(
         np.arange(ws.getNumberHistograms()), np.array(indexes)
     )
     sampled_index_sets = np.random.choice(
-        indexes, size=(n_sets, n_samples), replace=False
+        indexes, size=(n_sets, n_samples), replace=replace
     )
     n_noise_samples = int(noise_level * n_samples)
     sampled_noise_sets = np.random.choice(
-        unselected_indexes, size=(n_sets, n_noise_samples), replace=False
+        unselected_indexes, size=(n_sets, n_noise_samples), replace=replace
     )
     sampled_index_sets = np.append(sampled_index_sets, sampled_noise_sets, axis=1)
     y_data = ws.extractY()
