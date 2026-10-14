@@ -36,6 +36,18 @@ def load_and_process(run_no: int, name: str):
     return ws
 
 
+def convert_TOF_to_energy(ws, l2=0.6):
+    MoveInstrumentComponent(
+        Workspace=ws, ComponentName="source", Z=22.8, RelativePosition=False
+    )
+    MoveInstrumentComponent(
+        Workspace=ws, ComponentName="main-detector-bank", Z=l2, RelativePosition=False
+    )
+    ConvertUnits(InputWorkspace=ws, OutputWorkspace=ws, Target="Energy")
+    CropWorkspace(InputWorkspace=ws, OutputWorkspace=ws, XMax=500000)
+    return ws
+
+
 def get_ngem_from_INES_run_number(run_no: int):
     if platform.startswith("win"):
         data_base_dir = Path("//isis.cclrc.ac.uk/Shares/nGEM-Imaging/DATA/")
