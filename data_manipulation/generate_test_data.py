@@ -99,3 +99,16 @@ def get_workspace_indexes_from_W_array_gaussian_mixture(W, n_components=2):
         indices = np.where(labels == signal_component)[0]
         indices_by_column.append(indices)
     return indices_by_column
+
+
+def generate_test_data_from_selection_workspace(
+    ws, selection_ws, n_sets, n_samples, noise=0.0
+):
+    selection_detid_map = selection_ws.getDetectorIDToWorkspaceIndexMap(False, False)
+    selection_detids = selection_detid_map.keys()
+    full_detid_map = ws.getDetectorIDToWorkspaceIndexMap(False, False)
+    selection_ws_indexes = [full_detid_map[k] for k in selection_detids]
+    samples = mix_random_samples_from_workspace_indexes(
+        ws, selection_ws_indexes, n_sets, n_samples, noise, replace=True
+    )
+    return samples

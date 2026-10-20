@@ -17,6 +17,7 @@ pywavelets = ">=1.9.0,<2"
 scikit-image = ">=0.26.0,<0.27"
 joblib = ">=1.6.0,<2"
 pandas = ">=3.0.5,<4"
+pyyaml = ">=6.0.3,<7"
 
 [pypi-dependencies]
 endf = { git = "https://github.com/paulromano/endf-python.git" }

@@ -60,6 +60,7 @@ def save_sampled_data_to_np_format(
     spectra,
     x_bins,
     filename: str | Path,
+    metadata: dict | None = None,
 ):
     """Save sampled spectra to a .npz file.
 
@@ -67,12 +68,19 @@ def save_sampled_data_to_np_format(
         spectra: List of sampled spectra (NumPy arrays).
         x_bins: The x-axis bin edges corresponding to the spectra.
         filename (str | Path): Path where the .npz file will be saved.
+        metadata: Optional extra arrays to store alongside the spectra. Values
+            are converted with ``np.asarray``, so scalars, strings and lists
+            are all supported.
     """
     filename = Path(filename)
     filename.parent.mkdir(parents=True, exist_ok=True)
 
-    np.savez_compressed(
-        filename,
-        spectra_samples=np.array(spectra),
-        x_bins=x_bins,
-    )
+    payload = {
+        "spectra_samples": np.array(spectra),
+        "x_bins": np.asarray(x_bins),
+    }
+    if metadata:
+        for key, value in metadata.items():
+            payload[key] = np.asarray(value)
+
+    np.savez_compressed(filename, **payload)

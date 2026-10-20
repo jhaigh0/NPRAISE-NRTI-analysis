@@ -37,15 +37,18 @@ def load_and_process(run_no: int, name: str):
 
 
 def convert_TOF_to_energy(ws, l2=0.6):
+    new_ws_title = f"{ws.name()}_energy"
     MoveInstrumentComponent(
         Workspace=ws, ComponentName="source", Z=22.8, RelativePosition=False
     )
     MoveInstrumentComponent(
         Workspace=ws, ComponentName="main-detector-bank", Z=l2, RelativePosition=False
     )
-    ConvertUnits(InputWorkspace=ws, OutputWorkspace=ws, Target="Energy")
-    CropWorkspace(InputWorkspace=ws, OutputWorkspace=ws, XMax=500000)
-    return ws
+    ConvertUnits(InputWorkspace=ws, OutputWorkspace=new_ws_title, Target="Energy")
+    new_ws = CropWorkspace(
+        InputWorkspace=new_ws_title, OutputWorkspace=new_ws_title, XMax=500000
+    )
+    return new_ws
 
 
 def get_ngem_from_INES_run_number(run_no: int):

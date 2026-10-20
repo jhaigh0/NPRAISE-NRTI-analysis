@@ -1,0 +1,59 @@
+# Example training data generation configuration.
+#
+# Paths are resolved relative to this file, so the config can live alongside
+# (or inside) the data it describes.
+#
+# Usage:
+#   python generate_training_data.py --config configs/example_training_data.yaml \
+#       --n-sets 10 --n-samples 10 20 50 100 --noise 0.1 --l2 0.6
+
+defaults:
+  # Sample-detector distance (metres) used by convert_TOF_to_energy.
+  # Overridden per entry below or with the --l2 command line flag.
+  l2: 0.6
+
+  # Fraction of each sample that is drawn from outside the selection region.
+  # This is the "background" contribution; combined with a small n_samples it
+  # produces the noisy spectra needed to train the 1D CNN.
+  noise_level: 0.1
+
+  # Number of summed spectra generated for each configuration.
+  n_sets: 10
+
+  # Number of spectra summed together to make one sample. Looped over, so a
+  # single run produces samples with a range of signal-to-noise ratios.
+  n_samples: [10, 20, 50, 100]
+
+workspaces:
+  - name: Sn_letters_Bronze_sheet
+    workspace: ../data/Sn_letters_Bronze_sheet_normMonitor.nxs
+    # Optional per-workspace override of the sample-detector distance.
+    # l2: 0.63
+    selections:
+      # A region holding a single isotope.
+      - name: tin
+        selection: ../data/sel_tin.nxs
+        isotopes: [Sn-118, Sn-120]
+        label: 0
+
+      # A region holding a mix of isotopes.
+      - name: tin_silver
+        selection: ../data/sel_tin_silver.nxs
+        isotopes: [Sn-118, Ag-107, Ag-109]
+        label: 1
+
+      # A region with no isotope present, i.e. background only. An empty
+      # isotope list marks the region as background; 'is_background_only' is
+      # stored in the output file so the training script can pick it up.
+      - name: background
+        selection: ../data/sel_background.nxs
+        isotopes: []
+        label: 2
+
+  - name: Ag_normMonitor_selection
+    workspace: ../data/Ag_normMonitor_selection.nxs
+    selections:
+      - name: silver
+        selection: ../data/sel_silver.nxs
+        isotopes: [Ag-107, Ag-109]
+        label: 3
