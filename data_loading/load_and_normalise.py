@@ -36,8 +36,9 @@ def load_and_process(run_no: int, name: str):
     return ws
 
 
-def convert_TOF_to_energy(ws, l2=0.6):
-    new_ws_title = f"{ws.name()}_energy"
+def convert_TOF_to_energy(ws, l2=0.6, output_name: str | None = None):
+    ENERGY_REBIN_PARAMS = "1000,-0.005,500000"
+    new_ws_title = f"{ws.name()}_energy" if output_name is None else output_name
     MoveInstrumentComponent(
         Workspace=ws, ComponentName="source", Z=22.8, RelativePosition=False
     )
@@ -45,10 +46,44 @@ def convert_TOF_to_energy(ws, l2=0.6):
         Workspace=ws, ComponentName="main-detector-bank", Z=l2, RelativePosition=False
     )
     ConvertUnits(InputWorkspace=ws, OutputWorkspace=new_ws_title, Target="Energy")
-    new_ws = CropWorkspace(
-        InputWorkspace=new_ws_title, OutputWorkspace=new_ws_title, XMax=500000
+    # Rebin onto a fixed log grid, so that every workspace has the same X
+    # binning regardless of the L2 used to convert it.
+    return Rebin(
+        InputWorkspace=new_ws_title,
+        OutputWorkspace=new_ws_title,
+        Params=ENERGY_REBIN_PARAMS,
     )
-    return new_ws
+
+
+def convert_TOF_to_energy_at_l2_values(ws, l2_values, name_prefix: str = "l2"):
+    """Convert a TOF workspace to energy at several sample-detector distances.
+
+    The whole detector bank is moved for each distance, so that every pixel's
+    geometry is taken into account by the conversion, exactly as
+    :func:`convert_TOF_to_energy` does for a single distance.
+
+    Note that :func:`convert_TOF_to_energy` derives its output name from the
+    name of the input workspace, so it can only be used once per input. This
+    function therefore performs the conversion itself, giving each distance
+    its own output name.
+
+    All the converted workspaces are rebinned onto the same fixed grid, so
+    they all share exactly the same X axis and their counts can be compared
+    and stored together directly.
+
+    Args:
+        ws: The TOF workspace to convert.
+        l2_values: The sample-detector distances, in metres.
+        name_prefix: Prefix for the names of the generated workspaces.
+
+    Returns:
+        A list of workspaces, in the same order as ``l2_values``.
+    """
+    workspaces = []
+    for l2 in l2_values:
+        output_name = f"{name_prefix}_{l2:g}"
+        workspaces.append(convert_TOF_to_energy(ws, l2=l2, output_name=output_name))
+    return workspaces
 
 
 def get_ngem_from_INES_run_number(run_no: int):

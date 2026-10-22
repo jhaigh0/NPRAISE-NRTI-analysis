@@ -96,6 +96,7 @@ class WorkspaceEntry:
     selections: list[SelectionEntry] = field(default_factory=list)
     label: str | int | float | None = None
     l2: float | None = None
+    l2_values: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -104,6 +105,7 @@ class TrainingConfig:
 
     workspaces: list[WorkspaceEntry]
     l2: float = 0.6
+    l2_values: list[float] = field(default_factory=list)
     noise_level: float = 0.1
     n_sets: int = 10
     n_samples: list[int] = field(default_factory=list)
@@ -168,6 +170,7 @@ def load_config(path: str | Path) -> TrainingConfig:
     return TrainingConfig(
         workspaces=workspaces,
         l2=_as_float(defaults.get("l2", 0.6), "defaults.l2"),
+        l2_values=_as_float_list(defaults.get("l2_values", []), "defaults.l2_values"),
         noise_level=_as_float(defaults.get("noise_level", 0.1), "defaults.noise_level"),
         n_sets=_as_int(defaults.get("n_sets", 10), "defaults.n_sets"),
         n_samples=_as_int_list(defaults.get("n_samples", []), "defaults.n_samples"),
@@ -198,6 +201,8 @@ def _parse_entry(entry: Any, base_dir: Path, index: int) -> WorkspaceEntry:
     l2 = entry.get("l2")
     l2 = _as_float(l2, f"{context}.l2") if l2 is not None else None
 
+    l2_values = _as_float_list(entry.get("l2_values", []), f"{context}.l2_values")
+
     selections = _parse_selections(entry, base_dir, context, label)
 
     return WorkspaceEntry(
@@ -206,6 +211,7 @@ def _parse_entry(entry: Any, base_dir: Path, index: int) -> WorkspaceEntry:
         selections=selections,
         label=label,
         l2=l2,
+        l2_values=l2_values,
     )
 
 
@@ -378,4 +384,29 @@ def _as_int_list(value: Any, context: str) -> list[int]:
         if item <= 0:
             raise ConfigError(f"{context} must contain only positive integers.")
         result.append(item)
+    return result
+
+
+def _as_float_list(value: Any, context: str) -> list[float]:
+    """Coerce a value to a list of positive floats with a helpful error message.
+
+    An empty list is valid and means "no variation", i.e. a single value.
+    """
+    if value is None:
+        return []
+    if isinstance(value, bool):
+        raise ConfigError(f"{context} must be a number or list of numbers.")
+    if isinstance(value, (int, float)):
+        value = [value]
+    if not isinstance(value, list):
+        raise ConfigError(f"{context} must be a number or list of numbers.")
+    result = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ConfigError(f"{context} must contain only numbers, got {item!r}.")
+        if item <= 0:
+            raise ConfigError(f"{context} must contain only positive numbers.")
+        result.append(float(item))
+    if len(set(result)) != len(result):
+        raise ConfigError(f"{context} must not contain duplicate values.")
     return result

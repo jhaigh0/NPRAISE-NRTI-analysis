@@ -36,7 +36,7 @@ import numpy as np
 from mantid.simpleapi import Load
 
 from data_loading.export import save_sampled_data_to_np_format
-from data_loading.load_and_normalise import convert_TOF_to_energy
+from data_loading.load_and_normalise import convert_TOF_to_energy_at_l2_values
 from data_loading.workspace_config import (
     ConfigError,
     SelectionEntry,
@@ -59,6 +59,7 @@ class RunSettings:
     """The effective settings for a run, after merging CLI args and config."""
 
     l2: float
+    l2_values: list[float]
     noise_level: float
     n_sets: int
     n_samples: list[int]
@@ -120,6 +121,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--l2-values",
+        type=float,
+        nargs="+",
+        default=None,
+        help=(
+            "One or more sample-detector distances to spread the samples over. "
+            "Each selection region then gets samples taken at every distance, "
+            "so that the training data covers the variation between "
+            "experiments. Falls back to 'l2_values' in the config file."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("training_data"),
@@ -156,15 +169,28 @@ def build_settings(args: argparse.Namespace, config: TrainingConfig) -> RunSetti
     l2 = first_not_none(args.l2, config.l2, DEFAULT_L2)
     n_sets = first_not_none(args.n_sets, config.n_sets, DEFAULT_N_SETS)
 
+    # The L2 values to spread the samples over. An explicit list of values
+    # takes precedence over the single reference distance.
+    l2_values = first_not_none(args.l2_values, config.l2_values, None)
+    if l2_values:
+        l2_values = [float(value) for value in l2_values]
+    else:
+        l2_values = [float(l2)]
+
     if noise_level < 0:
         raise ConfigError("--noise must be greater than or equal to zero.")
     if l2 <= 0:
         raise ConfigError("--l2 must be greater than zero.")
     if n_sets <= 0:
         raise ConfigError("--n-sets must be greater than zero.")
+    if any(value <= 0 for value in l2_values):
+        raise ConfigError("--l2-values must all be greater than zero.")
+    if len(set(l2_values)) != len(l2_values):
+        raise ConfigError("--l2-values must not contain duplicates.")
 
     return RunSettings(
         l2=float(l2),
+        l2_values=l2_values,
         noise_level=float(noise_level),
         n_sets=int(n_sets),
         n_samples=[int(value) for value in n_samples],
@@ -205,11 +231,18 @@ def build_output_filename(
     """Build the output file name for one selection region and n_samples value.
 
     The name combines the workspace, the selection region and the settings
-    used, so that no two generated files collide.
+    used, so that no two generated files collide. The L2 part is only included
+    when a single L2 value is used, since a file with several L2 values has no
+    single L2 to name it after.
     """
+    l2_part = (
+        f"_l2{settings.l2:g}"
+        if len(settings.l2_values) <= 1
+        else f"_l2x{len(settings.l2_values)}"
+    )
     return (
         f"{entry.name}_{selection.name}_n{n_samples}"
-        f"_noise{settings.noise_level:g}_l2{settings.l2:g}.npz"
+        f"_noise{settings.noise_level:g}{l2_part}.npz"
     )
 
 
@@ -261,6 +294,61 @@ def check_noise_is_possible(
         )
 
 
+def sample_over_l2_values(
+    energy_workspaces: list,
+    l2_values: list[float],
+    selection_ws,
+    n_samples: int,
+    settings: RunSettings,
+) -> tuple[list[np.ndarray], list[float]]:
+    """Sample spectra from a selection region at each of the L2 values.
+
+    The samples are spread evenly over the L2 values, so that the region ends
+    up with the same number of samples at every sample-detector distance. All
+    the workspaces share the same fixed energy grid, so the samples can be
+    stored together directly, with the L2 variation showing up as a small
+    shift of the spectra.
+
+    Args:
+        energy_workspaces: The full workspace converted to energy, one per L2
+            value, in the same order as ``l2_values``.
+        l2_values: The L2 value of each workspace in ``energy_workspaces``.
+        selection_ws: The selection region to sample from.
+        n_samples: The number of spectra summed together to make one sample.
+        settings: The effective run settings.
+
+    Returns:
+        A tuple of the sampled spectra and the L2 value of each sample.
+    """
+    n_l2 = len(l2_values)
+    n_sets = settings.n_sets
+
+    # Spread the sets evenly over the L2 values, so every L2 gets the same
+    # number of samples.
+    sets_per_l2 = [n_sets // n_l2] * n_l2
+    for i in range(n_sets % n_l2):
+        sets_per_l2[i] += 1
+
+    samples: list[np.ndarray] = []
+    sample_l2: list[float] = []
+
+    for ws, l2, n_sets_here in zip(energy_workspaces, l2_values, sets_per_l2):
+        if n_sets_here == 0:
+            continue
+
+        l2_samples = generate_test_data_from_selection_workspace(
+            ws,
+            selection_ws,
+            n_sets_here,
+            n_samples,
+            settings.noise_level,
+        )
+        samples.extend(l2_samples)
+        sample_l2.extend([l2] * n_sets_here)
+
+    return samples, sample_l2
+
+
 def generate_for_workspace(
     entry: WorkspaceEntry,
     settings: RunSettings,
@@ -268,8 +356,8 @@ def generate_for_workspace(
 ) -> list[Path]:
     """Generate and save the training data for a single workspace.
 
-    The full workspace is loaded and converted to energy once, then each
-    selection region of the workspace is sampled in turn.
+    The full workspace is loaded and converted to energy once for each L2
+    value, then each selection region of the workspace is sampled in turn.
 
     Args:
         entry: The workspace entry from the configuration file.
@@ -279,18 +367,30 @@ def generate_for_workspace(
     Returns:
         The list of files written.
     """
-    l2 = entry.l2 if entry.l2 is not None else settings.l2
+    l2_values = entry.l2_values or settings.l2_values
 
     print(f"[{entry.name}] loading workspace")
     sample_ws = load_workspace(entry.workspace, f"{entry.name}_sample")
 
-    print(f"[{entry.name}] converting TOF to energy (l2={l2})")
-    energy_ws = convert_TOF_to_energy(sample_ws, l2=l2)
+    print(
+        f"[{entry.name}] converting TOF to energy "
+        f"(l2 values: {', '.join(f'{v:g}' for v in l2_values)})"
+    )
+    energy_workspaces = convert_TOF_to_energy_at_l2_values(
+        sample_ws, l2_values, name_prefix=f"{entry.name}_l2"
+    )
 
     written: list[Path] = []
     for selection in entry.selections:
         written.extend(
-            generate_for_selection(entry, selection, energy_ws, settings, overwrite)
+            generate_for_selection(
+                entry,
+                selection,
+                energy_workspaces,
+                l2_values,
+                settings,
+                overwrite,
+            )
         )
     return written
 
@@ -298,16 +398,24 @@ def generate_for_workspace(
 def generate_for_selection(
     entry: WorkspaceEntry,
     selection: SelectionEntry,
-    energy_ws,
+    energy_workspaces: list,
+    l2_values: list[float],
     settings: RunSettings,
     overwrite: bool = False,
 ) -> list[Path]:
     """Generate and save the training data for one selection region.
 
+    The samples are spread over the given L2 values, so that the region has
+    data at each of the sample-detector distances seen between experiments.
+    All the samples share one common energy axis, so that they can be stored
+    together in a single file.
+
     Args:
         entry: The workspace entry from the configuration file.
         selection: The selection region to sample from.
-        energy_ws: The full workspace, converted to energy.
+        energy_workspaces: The full workspace converted to energy, one per L2
+            value, in the same order as ``l2_values``.
+        l2_values: The L2 value of each workspace in ``energy_workspaces``.
         settings: The effective run settings.
         overwrite: Whether to overwrite existing output files.
 
@@ -317,7 +425,7 @@ def generate_for_selection(
     name = f"{entry.name}/{selection.name}"
     selection_ws = load_workspace(selection.selection, f"{entry.name}_selection")
 
-    check_noise_is_possible(energy_ws, selection_ws, name, settings)
+    check_noise_is_possible(energy_workspaces[0], selection_ws, name, settings)
     isotopes = (
         ", ".join(selection.isotopes) if selection.isotopes else "background only"
     )
@@ -339,17 +447,17 @@ def generate_for_selection(
             f"[{name}] sampling n_samples={n_samples}, "
             f"n_sets={settings.n_sets}, noise={settings.noise_level}"
         )
-        samples = generate_test_data_from_selection_workspace(
-            energy_ws,
+        samples, sample_l2 = sample_over_l2_values(
+            energy_workspaces,
+            l2_values,
             selection_ws,
-            settings.n_sets,
             n_samples,
-            settings.noise_level,
+            settings,
         )
 
         save_sampled_data_to_np_format(
             samples,
-            energy_ws.readX(0),
+            energy_workspaces[0].readX(0),
             output_path,
             metadata={
                 "name": entry.name,
@@ -361,7 +469,8 @@ def generate_for_selection(
                 "n_samples": np.asarray(n_samples),
                 "n_sets": np.asarray(settings.n_sets),
                 "noise_level": np.asarray(settings.noise_level),
-                "l2": np.asarray(entry.l2 if entry.l2 is not None else settings.l2),
+                "l2_values": np.asarray(l2_values),
+                "spectra_l2": np.asarray(sample_l2),
             },
         )
         print(f"[{name}] wrote {output_path}")
