@@ -10,7 +10,8 @@ For every workspace listed in the configuration file this script:
    workspace (a cropped region of the detector holding a single isotope, a mix
    of isotopes, or background only) and samples summed spectra from it with
    :func:`data_manipulation.generate_test_data.generate_test_data_from_selection_workspace`,
-   once for every requested ``n_samples`` value.
+   once for every requested ``n_samples`` value. A region may instead be a
+   mixture of several other regions, given by a ``mix`` list.
 3. Saves the result to a ``.npz`` file ready for training.
 
 Example::
@@ -46,7 +47,7 @@ from data_loading.workspace_config import (
     load_config,
 )
 from data_manipulation.generate_test_data import (
-    generate_test_data_from_selection_workspace,
+    generate_test_data_from_mixed_parts,
 )
 
 DEFAULT_L2 = 0.6
@@ -117,7 +118,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Sample-detector distance in metres used for the TOF to energy "
-            "conversion. Falls back to 'l2' in the config file."
+            "conversion. This applies to every workspace, since a mixed "
+            "region may take parts from several of them and they have to "
+            "share the same energy axis. Falls back to 'l2' in the config "
+            "file, and is ignored when --l2-values is given."
         ),
     )
     parser.add_argument(
@@ -129,7 +133,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "One or more sample-detector distances to spread the samples over. "
             "Each selection region then gets samples taken at every distance, "
             "so that the training data covers the variation between "
-            "experiments. Falls back to 'l2_values' in the config file."
+            "experiments. This applies to every workspace. Falls back to "
+            "'l2_values' in the config file."
         ),
     )
     parser.add_argument(
@@ -263,41 +268,111 @@ def _encode_label(label: str | float | None) -> np.ndarray:
 
 
 def check_noise_is_possible(
-    energy_ws, selection_ws, name: str, settings: RunSettings
+    parts: list[tuple], name: str, settings: RunSettings
 ) -> None:
     """Check that background spectra are available to draw noise from.
 
-    Noise spectra are drawn from the detectors *outside* the selection region,
-    so a selection that covers every detector of the full workspace leaves
-    nothing to draw from.
+    Noise spectra are drawn from the detectors of a workspace that are
+    outside the region, so a region that covers every detector of one of its
+    workspaces leaves nothing to draw from.
 
     Args:
-        energy_ws: The full workspace, converted to energy.
-        selection_ws: The selection workspace.
+        parts: The parts of the region. Each is a tuple of the full
+            workspace, its selection workspace and its fraction.
         name: Name of the selection region, used for error messages.
         settings: The effective run settings, used to check the noise level.
 
     Raises:
-        ValueError: If noise is requested but the selection leaves no
-            detectors outside it.
+        ValueError: If noise is requested but the region leaves no detectors
+            outside it.
     """
     if settings.noise_level <= 0:
         return
 
-    n_selected = selection_ws.getNumberHistograms()
-    n_total = energy_ws.getNumberHistograms()
-    if n_selected >= n_total:
-        raise ValueError(
-            f"Selection workspace '{name}' covers every detector in the "
-            "full workspace, so no background spectra are available to draw "
-            "noise from. Use --noise 0 or select a smaller region."
+    # The detectors used by each workspace, so that a workspace is only
+    # checked against the parts that come from it.
+    used: dict[int, set[int]] = {}
+    for full_ws, selection_ws, _ in parts:
+        key = id(full_ws)
+        used.setdefault(key, set()).update(
+            selection_ws.getDetectorIDToWorkspaceIndexMap(False, False).keys()
         )
+
+    for full_ws, _, _ in parts:
+        key = id(full_ws)
+        n_total = full_ws.getNumberHistograms()
+        if len(used[key]) >= n_total:
+            raise ValueError(
+                f"Selection region '{name}' covers every detector of one of "
+                "its workspaces, so no background spectra are available to "
+                "draw noise from. Use --noise 0 or select a smaller region."
+            )
+
+
+def load_selection_parts(
+    selection: SelectionEntry, workspace_name: str
+) -> list[tuple[str, object, float]]:
+    """Load the selection workspaces that make up a region.
+
+    A plain region is a single part with a fraction of one. A mixed region
+    is made up of one part per entry of its ``mix`` list, and each part may
+    come from a different workspace.
+
+    Args:
+        selection: The region to load.
+        workspace_name: Name of the workspace holding the region.
+
+    Returns:
+        A list of parts. Each part is a tuple of the name of the workspace
+        it comes from, its selection workspace, and the fraction of the
+        region it covers.
+    """
+    if not selection.is_mixed:
+        name = f"{workspace_name}_selection_{selection.name}"
+        selection_ws = load_workspace(selection.selection, name)
+        return [(workspace_name, selection_ws, 1.0)]
+
+    parts = []
+    for index, part in enumerate(selection.mix):
+        part_workspace = part.workspace or workspace_name
+        name = f"{workspace_name}_selection_{selection.name}_{index}_{part.name}"
+        selection_ws = load_workspace(part.selection, name)
+        parts.append((part_workspace, selection_ws, part.fraction))
+    return parts
+
+
+def parts_at_l2(
+    parts: list[tuple],
+    energy_workspaces: dict[str, list],
+    l2_index: int,
+) -> list[tuple]:
+    """Build the parts of a region for one L2 value.
+
+    Args:
+        parts: The parts of the region, as returned by
+            :func:`load_selection_parts`.
+        energy_workspaces: The converted workspaces of every workspace that
+            takes part, keyed by workspace name.
+        l2_index: The index of the L2 value to use.
+
+    Returns:
+        The parts, each a tuple of its full workspace, its selection
+        workspace and its fraction.
+    """
+    return [
+        (
+            energy_workspaces[workspace_name][l2_index],
+            selection_ws,
+            fraction,
+        )
+        for workspace_name, selection_ws, fraction in parts
+    ]
 
 
 def sample_over_l2_values(
-    energy_workspaces: list,
+    energy_workspaces: dict[str, list],
     l2_values: list[float],
-    selection_ws,
+    parts: list[tuple],
     n_samples: int,
     settings: RunSettings,
 ) -> tuple[list[np.ndarray], list[float]]:
@@ -310,10 +385,13 @@ def sample_over_l2_values(
     shift of the spectra.
 
     Args:
-        energy_workspaces: The full workspace converted to energy, one per L2
-            value, in the same order as ``l2_values``.
+        energy_workspaces: The converted workspaces of every workspace that
+            takes part, keyed by workspace name. Each holds one workspace per
+            L2 value.
         l2_values: The L2 value of each workspace in ``energy_workspaces``.
-        selection_ws: The selection region to sample from.
+        parts: The parts of the region. Each is a tuple of the name of the
+            workspace it comes from, its selection workspace, and the
+            fraction of the region it covers.
         n_samples: The number of spectra summed together to make one sample.
         settings: The effective run settings.
 
@@ -332,13 +410,12 @@ def sample_over_l2_values(
     samples: list[np.ndarray] = []
     sample_l2: list[float] = []
 
-    for ws, l2, n_sets_here in zip(energy_workspaces, l2_values, sets_per_l2):
+    for l2_index, (l2, n_sets_here) in enumerate(zip(l2_values, sets_per_l2)):
         if n_sets_here == 0:
             continue
 
-        l2_samples = generate_test_data_from_selection_workspace(
-            ws,
-            selection_ws,
+        l2_samples = generate_test_data_from_mixed_parts(
+            parts_at_l2(parts, energy_workspaces, l2_index),
             n_sets_here,
             n_samples,
             settings.noise_level,
@@ -349,25 +426,20 @@ def sample_over_l2_values(
     return samples, sample_l2
 
 
-def generate_for_workspace(
-    entry: WorkspaceEntry,
-    settings: RunSettings,
-    overwrite: bool = False,
-) -> list[Path]:
-    """Generate and save the training data for a single workspace.
+def load_and_convert_workspace(entry: WorkspaceEntry, settings: RunSettings) -> list:
+    """Load a workspace and convert it to energy at each L2 value.
 
-    The full workspace is loaded and converted to energy once for each L2
-    value, then each selection region of the workspace is sampled in turn.
+    Every workspace is converted at the same set of L2 values, because the
+    sample-detector distance is a global setting.
 
     Args:
         entry: The workspace entry from the configuration file.
         settings: The effective run settings.
-        overwrite: Whether to overwrite existing output files.
 
     Returns:
-        The list of files written.
+        The converted workspaces, one per L2 value.
     """
-    l2_values = entry.l2_values or settings.l2_values
+    l2_values = settings.l2_values
 
     print(f"[{entry.name}] loading workspace")
     sample_ws = load_workspace(entry.workspace, f"{entry.name}_sample")
@@ -376,10 +448,33 @@ def generate_for_workspace(
         f"[{entry.name}] converting TOF to energy "
         f"(l2 values: {', '.join(f'{v:g}' for v in l2_values)})"
     )
-    energy_workspaces = convert_TOF_to_energy_at_l2_values(
+    return convert_TOF_to_energy_at_l2_values(
         sample_ws, l2_values, name_prefix=f"{entry.name}_l2"
     )
 
+
+def generate_for_workspace(
+    entry: WorkspaceEntry,
+    energy_workspaces: dict[str, list],
+    settings: RunSettings,
+    overwrite: bool = False,
+) -> list[Path]:
+    """Generate and save the training data for a single workspace.
+
+    Each selection region of the workspace is sampled in turn. A region may
+    mix parts taken from other workspaces, which are sampled from the
+    workspaces they belong to.
+
+    Args:
+        entry: The workspace entry from the configuration file.
+        energy_workspaces: The converted workspaces of every workspace that
+            takes part, keyed by workspace name.
+        settings: The effective run settings.
+        overwrite: Whether to overwrite existing output files.
+
+    Returns:
+        The list of files written.
+    """
     written: list[Path] = []
     for selection in entry.selections:
         written.extend(
@@ -387,7 +482,6 @@ def generate_for_workspace(
                 entry,
                 selection,
                 energy_workspaces,
-                l2_values,
                 settings,
                 overwrite,
             )
@@ -398,8 +492,7 @@ def generate_for_workspace(
 def generate_for_selection(
     entry: WorkspaceEntry,
     selection: SelectionEntry,
-    energy_workspaces: list,
-    l2_values: list[float],
+    energy_workspaces: dict[str, list],
     settings: RunSettings,
     overwrite: bool = False,
 ) -> list[Path]:
@@ -413,9 +506,9 @@ def generate_for_selection(
     Args:
         entry: The workspace entry from the configuration file.
         selection: The selection region to sample from.
-        energy_workspaces: The full workspace converted to energy, one per L2
-            value, in the same order as ``l2_values``.
-        l2_values: The L2 value of each workspace in ``energy_workspaces``.
+        energy_workspaces: The converted workspaces of every workspace that
+            takes part, keyed by workspace name. Each holds one workspace per
+            L2 value.
         settings: The effective run settings.
         overwrite: Whether to overwrite existing output files.
 
@@ -423,16 +516,24 @@ def generate_for_selection(
         The list of files written.
     """
     name = f"{entry.name}/{selection.name}"
-    selection_ws = load_workspace(selection.selection, f"{entry.name}_selection")
+    parts = load_selection_parts(selection, entry.name)
 
-    check_noise_is_possible(energy_workspaces[0], selection_ws, name, settings)
+    n_detectors = sum(ws.getNumberHistograms() for _, ws, _ in parts)
+    check_noise_is_possible(parts_at_l2(parts, energy_workspaces, 0), name, settings)
     isotopes = (
         ", ".join(selection.isotopes) if selection.isotopes else "background only"
     )
-    print(
-        f"[{name}] {selection_ws.getNumberHistograms()} detector(s), "
-        f"isotopes: {isotopes}"
-    )
+    if selection.is_mixed:
+        described = ", ".join(
+            f"{part.name} ({part.workspace}) at {fraction:g}"
+            for part, (_, _, fraction) in zip(selection.mix, parts)
+        )
+        print(
+            f"[{name}] mixed region of {n_detectors} detector(s) "
+            f"({described}), isotopes: {isotopes}"
+        )
+    else:
+        print(f"[{name}] {n_detectors} detector(s), isotopes: {isotopes}")
 
     written: list[Path] = []
     for n_samples in settings.n_samples:
@@ -449,27 +550,36 @@ def generate_for_selection(
         )
         samples, sample_l2 = sample_over_l2_values(
             energy_workspaces,
-            l2_values,
-            selection_ws,
+            settings.l2_values,
+            parts,
             n_samples,
             settings,
         )
 
         save_sampled_data_to_np_format(
             samples,
-            energy_workspaces[0].readX(0),
+            energy_workspaces[entry.name][0].readX(0),
             output_path,
             metadata={
                 "name": entry.name,
                 "selection_name": selection.name,
                 "isotopes": np.asarray(selection.isotopes, dtype=str),
                 "is_background_only": np.asarray(selection.is_background_only),
+                "is_mixed": np.asarray(selection.is_mixed),
+                "mix_fractions": np.asarray([part[2] for part in parts], dtype=float),
+                "mix_names": np.asarray(
+                    [part.name for part in selection.mix], dtype=str
+                ),
+                "mix_workspaces": np.asarray(
+                    [part.workspace or entry.name for part in selection.mix],
+                    dtype=str,
+                ),
                 "label": _encode_label(selection.label),
                 "label_is_null": np.asarray(selection.label is None),
                 "n_samples": np.asarray(n_samples),
                 "n_sets": np.asarray(settings.n_sets),
                 "noise_level": np.asarray(settings.noise_level),
-                "l2_values": np.asarray(l2_values),
+                "l2_values": np.asarray(settings.l2_values),
                 "spectra_l2": np.asarray(sample_l2),
             },
         )
@@ -504,10 +614,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"into {settings.output_dir}"
     )
 
+    # Every workspace is loaded and converted before any data is generated,
+    # because a mixed region may take parts from several workspaces.
+    energy_workspaces: dict[str, list] = {}
     failures = 0
     for entry in config.workspaces:
         try:
-            generate_for_workspace(entry, settings, overwrite=args.overwrite)
+            converted = load_and_convert_workspace(entry, settings)
+        except Exception as exc:
+            failures += 1
+            print(f"Error loading {entry.name}: {exc}", file=sys.stderr)
+            continue
+        energy_workspaces[entry.name] = converted
+
+    for entry in config.workspaces:
+        if entry.name not in energy_workspaces:
+            continue
+        try:
+            generate_for_workspace(
+                entry,
+                energy_workspaces,
+                settings,
+                overwrite=args.overwrite,
+            )
         except Exception as exc:
             failures += 1
             print(f"Error processing {entry.name}: {exc}", file=sys.stderr)

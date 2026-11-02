@@ -39,6 +39,11 @@ Example configuration::
             selection: data/sel_background.nxs
             isotopes: []
             label: 0
+
+The sample-detector distance is a global setting, given in ``defaults`` or
+with the ``--l2`` and ``--l2-values`` command line flags. It cannot be set
+per workspace, because a mixed region may take parts from several
+workspaces and they all have to share the same energy axis.
 """
 
 from __future__ import annotations
@@ -51,6 +56,7 @@ import yaml
 
 __all__ = [
     "ConfigError",
+    "MixComponent",
     "SelectionEntry",
     "TrainingConfig",
     "WorkspaceEntry",
@@ -64,22 +70,55 @@ class ConfigError(ValueError):
 
 
 @dataclass
+class MixComponent:
+    """One part of a selection region that mixes several regions together.
+
+    Attributes:
+        selection: Location of the selection workspace file holding this part
+            of the mixture. It is ``None`` until a reference by name has been
+            resolved against the regions of the workspace it comes from.
+        fraction: The share of the mixture contributed by this part. The
+            shares of a mixture are normalised to sum to one.
+        name: Name of this part, stored in the output metadata.
+        workspace: Name of the workspace this part comes from. ``None`` means
+            the same workspace as the region that holds the mixture, so a
+            mixture may span several workspaces.
+    """
+
+    selection: Path | None
+    fraction: float
+    name: str = ""
+    workspace: str | None = None
+
+
+@dataclass
 class SelectionEntry:
     """A single selection region within a workspace.
 
     Attributes:
         selection: Location of the selection workspace file. It holds a
-            subset of the detector IDs of the full workspace.
+            subset of the detector IDs of the full workspace. It is ``None``
+            for a region that mixes several other regions together.
         isotopes: The isotope(s) present in the region. An empty list means
             the region contains background only.
         name: Name for the region, used in the output file name.
         label: Optional label stored with the generated data.
+        mix: The parts of a mixed region. Empty for a plain region.
+        isotopes_explicit: Whether the isotopes were given in the config
+            rather than derived from the parts of a mixed region.
     """
 
-    selection: Path
+    selection: Path | None
     isotopes: list[str] = field(default_factory=list)
     name: str = ""
     label: str | int | float | None = None
+    mix: list[MixComponent] = field(default_factory=list)
+    isotopes_explicit: bool = False
+
+    @property
+    def is_mixed(self) -> bool:
+        """Whether the region mixes several other regions together."""
+        return bool(self.mix)
 
     @property
     def is_background_only(self) -> bool:
@@ -89,14 +128,16 @@ class SelectionEntry:
 
 @dataclass
 class WorkspaceEntry:
-    """A single workspace to generate training data from."""
+    """A single workspace to generate training data from.
+
+    The sample-detector distance is a global setting, so every workspace is
+    converted at the same set of L2 values.
+    """
 
     name: str
     workspace: Path
     selections: list[SelectionEntry] = field(default_factory=list)
     label: str | int | float | None = None
-    l2: float | None = None
-    l2_values: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -167,6 +208,17 @@ def load_config(path: str | Path) -> TrainingConfig:
     ]
     _check_duplicate_names(workspaces)
 
+    # The parts of a mixed region may refer to a region of another
+    # workspace, so they can only be resolved once every workspace has been
+    # parsed.
+    for workspace in workspaces:
+        _resolve_mix_references(
+            workspace.selections,
+            f"workspaces[{workspace.name}]",
+            workspace.name,
+            workspaces,
+        )
+
     return TrainingConfig(
         workspaces=workspaces,
         l2=_as_float(defaults.get("l2", 0.6), "defaults.l2"),
@@ -198,10 +250,16 @@ def _parse_entry(entry: Any, base_dir: Path, index: int) -> WorkspaceEntry:
     if label is not None and not isinstance(label, (str, int, float)):
         raise ConfigError(f"{context}.label must be a string, number or null.")
 
-    l2 = entry.get("l2")
-    l2 = _as_float(l2, f"{context}.l2") if l2 is not None else None
-
-    l2_values = _as_float_list(entry.get("l2_values", []), f"{context}.l2_values")
+    # The sample-detector distance is a global setting. A workspace may not
+    # override it, because a mixed region takes parts from several
+    # workspaces and they all have to share the same energy axis.
+    for key in ("l2", "l2_values"):
+        if key in entry:
+            raise ConfigError(
+                f"{context} must not define '{key}'. The sample-detector "
+                "distance is a global setting, given in 'defaults' or with "
+                "the --l2 and --l2-values command line flags."
+            )
 
     selections = _parse_selections(entry, base_dir, context, label)
 
@@ -210,8 +268,6 @@ def _parse_entry(entry: Any, base_dir: Path, index: int) -> WorkspaceEntry:
         workspace=workspace,
         selections=selections,
         label=label,
-        l2=l2,
-        l2_values=l2_values,
     )
 
 
@@ -273,6 +329,17 @@ def _parse_selection(
         raise ConfigError(f"{context} must be a mapping.")
 
     selection_raw = raw.get("selection") or raw.get("file")
+    mix_raw = raw.get("mix")
+
+    if selection_raw and mix_raw:
+        raise ConfigError(
+            f"{context} must define either a 'selection' file location or a "
+            "'mix' list, not both."
+        )
+
+    if mix_raw:
+        return _parse_mixed_selection(raw, base_dir, context, workspace_label)
+
     if not selection_raw:
         raise ConfigError(f"{context} must define a 'selection' file location.")
     selection = _resolve_path(selection_raw, base_dir, f"{context}.selection")
@@ -294,7 +361,156 @@ def _parse_selection(
         isotopes=isotopes,
         name=name.strip(),
         label=label,
+        isotopes_explicit="isotopes" in raw,
     )
+
+
+def _parse_mixed_selection(
+    raw: dict, base_dir: Path, context: str, workspace_label: Any
+) -> SelectionEntry:
+    """Validate and convert a selection region that mixes other regions.
+
+    A mixed region is described by a ``mix`` list. Each part either names a
+    selection file directly, or refers to another region of the same workspace
+    by its ``name`` with the ``region`` key.
+    """
+    mix_raw = raw["mix"]
+    if not isinstance(mix_raw, list) or len(mix_raw) < 2:
+        raise ConfigError(f"{context}.mix must be a list of at least two parts to mix.")
+
+    parts: list[MixComponent] = []
+    for index, part in enumerate(mix_raw):
+        part_context = f"{context}.mix[{index}]"
+        if not isinstance(part, dict):
+            raise ConfigError(f"{part_context} must be a mapping.")
+
+        fraction = part.get("fraction", 1.0)
+        fraction = _as_float(fraction, f"{part_context}.fraction")
+        if fraction <= 0:
+            raise ConfigError(f"{part_context}.fraction must be greater than zero.")
+
+        selection_raw = part.get("selection") or part.get("file")
+        region = part.get("region")
+        workspace = part.get("workspace")
+
+        if selection_raw and region:
+            raise ConfigError(
+                f"{part_context} must define either a 'selection' file location "
+                "or a 'region' name, not both."
+            )
+
+        if workspace is not None and (
+            not isinstance(workspace, str) or not workspace.strip()
+        ):
+            raise ConfigError(f"{part_context}.workspace must be a non-empty string.")
+        workspace = workspace.strip() if workspace else None
+
+        if selection_raw:
+            selection = _resolve_path(
+                selection_raw, base_dir, f"{part_context}.selection"
+            )
+            name = part.get("name") or selection.stem
+        elif region:
+            if not isinstance(region, str) or not region.strip():
+                raise ConfigError(f"{part_context}.region must be a non-empty string.")
+            # Resolved against the regions once they are all parsed.
+            selection = None
+            name = region.strip()
+        else:
+            raise ConfigError(
+                f"{part_context} must define a 'selection' file location or a "
+                "'region' name."
+            )
+
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"{part_context}.name must be a non-empty string.")
+
+        parts.append(
+            MixComponent(
+                selection=selection,
+                fraction=fraction,
+                name=name.strip(),
+                workspace=workspace,
+            )
+        )
+
+    name = raw.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ConfigError(f"{context}.name must be a non-empty string.")
+
+    isotopes = _parse_isotopes(raw.get("isotopes", []), f"{context}.isotopes")
+
+    label = raw.get("label", workspace_label)
+    if label is not None and not isinstance(label, (str, int, float)):
+        raise ConfigError(f"{context}.label must be a string, number or null.")
+
+    return SelectionEntry(
+        selection=None,
+        isotopes=isotopes,
+        name=name.strip(),
+        label=label,
+        mix=parts,
+        isotopes_explicit="isotopes" in raw,
+    )
+
+
+def _resolve_mix_references(
+    selections: list[SelectionEntry],
+    context: str,
+    workspace_name: str,
+    all_workspaces: list[WorkspaceEntry] | None = None,
+) -> None:
+    """Point the parts of every mixed region at their selection files.
+
+    A part may refer to another region by name. By default the region is
+    looked up in the same workspace, but a part may name another workspace
+    with the ``workspace`` key, so that a mixture can span several
+    workspaces. The reference is resolved here, once all the regions are
+    known.
+
+    The isotopes of a mixed region are also derived here, as the union of the
+    isotopes of its parts, unless the config gave them explicitly.
+    """
+    # Every region of every workspace, keyed by workspace and then by name.
+    by_workspace: dict[str, dict[str, SelectionEntry]] = {}
+    for entry in all_workspaces or []:
+        by_workspace[entry.name] = {
+            selection.name: selection
+            for selection in entry.selections
+            if selection.selection is not None
+        }
+    by_workspace.setdefault(workspace_name, {})
+
+    def find(part: MixComponent) -> SelectionEntry | None:
+        target = part.workspace or workspace_name
+        return by_workspace.get(target, {}).get(part.name)
+
+    for selection in selections:
+        for part in selection.mix:
+            if part.selection is not None:
+                continue
+            referenced = find(part)
+            if referenced is None:
+                where = part.workspace or workspace_name
+                raise ConfigError(
+                    f"{context}.selections[{selection.name}].mix refers to "
+                    f"'{part.name}' in workspace '{where}', which is not a "
+                    "region of that workspace."
+                )
+            part.selection = referenced.selection
+            if part.workspace is None:
+                part.workspace = workspace_name
+
+        if selection.is_mixed and not selection.isotopes_explicit:
+            isotopes: list[str] = []
+            for part in selection.mix:
+                referenced = find(part)
+                if referenced is None:
+                    continue
+                for isotope in referenced.isotopes:
+                    if isotope not in isotopes:
+                        isotopes.append(isotope)
+            selection.isotopes = isotopes
 
 
 def _parse_isotopes(value: Any, context: str) -> list[str]:

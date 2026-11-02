@@ -47,7 +47,6 @@ workspaces:
         self.assertEqual(len(config.workspaces), 1)
         entry = config.workspaces[0]
         self.assertEqual(entry.name, "sample")
-        self.assertIsNone(entry.l2)
 
         self.assertAlmostEqual(config.l2, 0.63)
         self.assertAlmostEqual(config.noise_level, 0.2)
@@ -246,10 +245,13 @@ workspaces:
         )
         self.assertEqual(config.workspaces[0].selections[0].isotopes, ["Sn-118"])
 
-    def test_per_entry_l2_override(self):
-        config = load_config(
-            self._write(
-                """
+    def test_per_entry_l2_override_is_rejected(self):
+        # The sample-detector distance is a global setting, because a mixed
+        # region may take parts from several workspaces.
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
 defaults:
   l2: 0.6
 workspaces:
@@ -258,9 +260,24 @@ workspaces:
       - selection: sel.nxs
     l2: 0.65
 """,
+                )
             )
-        )
-        self.assertEqual(config.workspaces[0].l2, 0.65)
+
+    def test_per_entry_l2_values_override_is_rejected(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+defaults:
+  l2_values: [0.62, 0.63]
+workspaces:
+  - workspace: full.nxs
+    selections:
+      - selection: sel.nxs
+    l2_values: [0.64, 0.65]
+""",
+                )
+            )
 
     def test_missing_file_raises(self):
         with self.assertRaises(ConfigError):
@@ -330,6 +347,254 @@ workspaces:
     workspace: b.nxs
     selections:
       - selection: sel.nxs
+""",
+                )
+            )
+
+    def test_loads_a_mixed_region(self):
+        config = load_config(
+            self._write(
+                """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: gold
+        selection: sel_gold.nxs
+        isotopes: [Au-197]
+      - name: silver
+        selection: sel_silver.nxs
+        isotopes: [Ag-107, Ag-109]
+      - name: alloy
+        mix:
+          - region: gold
+            fraction: 0.7
+          - region: silver
+            fraction: 0.3
+""",
+            )
+        )
+
+        selections = config.workspaces[0].selections
+        alloy = selections[2]
+        self.assertTrue(alloy.is_mixed)
+        self.assertIsNone(alloy.selection)
+        self.assertEqual(len(alloy.mix), 2)
+        self.assertAlmostEqual(alloy.mix[0].fraction, 0.7)
+        self.assertAlmostEqual(alloy.mix[1].fraction, 0.3)
+        self.assertEqual(alloy.mix[0].name, "gold")
+        # The parts resolve to the selection files of the regions they refer to.
+        self.assertEqual(alloy.mix[0].selection, selections[0].selection)
+        self.assertEqual(alloy.mix[1].selection, selections[1].selection)
+
+    def test_mixed_region_derives_its_isotopes(self):
+        config = load_config(
+            self._write(
+                """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: gold
+        selection: sel_gold.nxs
+        isotopes: [Au-197]
+      - name: silver
+        selection: sel_silver.nxs
+        isotopes: [Ag-107, Ag-109]
+      - name: alloy
+        mix:
+          - region: gold
+            fraction: 0.7
+          - region: silver
+            fraction: 0.3
+""",
+            )
+        )
+
+        alloy = config.workspaces[0].selections[2]
+        self.assertEqual(alloy.isotopes, ["Au-197", "Ag-107", "Ag-109"])
+
+    def test_mixed_region_keeps_explicit_isotopes(self):
+        config = load_config(
+            self._write(
+                """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: gold
+        selection: sel_gold.nxs
+        isotopes: [Au-197]
+      - name: alloy
+        isotopes: [Au-197, Pd-108]
+        mix:
+          - region: gold
+            fraction: 1.0
+          - selection: sel_other.nxs
+            fraction: 1.0
+""",
+            )
+        )
+
+        alloy = config.workspaces[0].selections[1]
+        self.assertEqual(alloy.isotopes, ["Au-197", "Pd-108"])
+
+    def test_mixed_region_needs_at_least_two_parts(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: alloy
+        mix:
+          - selection: sel.nxs
+            fraction: 1.0
+""",
+                )
+            )
+
+    def test_mixed_region_cannot_have_a_selection_as_well(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: alloy
+        selection: sel.nxs
+        mix:
+          - selection: a.nxs
+          - selection: b.nxs
+""",
+                )
+            )
+
+    def test_mixed_region_rejects_an_unknown_region(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: alloy
+        mix:
+          - region: missing
+            fraction: 1.0
+          - selection: other.nxs
+            fraction: 1.0
+""",
+                )
+            )
+
+    def test_mixed_region_rejects_a_non_positive_fraction(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: alloy
+        mix:
+          - selection: a.nxs
+            fraction: 0.0
+          - selection: b.nxs
+            fraction: 1.0
+""",
+                )
+            )
+
+    def test_mixed_region_can_span_two_workspaces(self):
+        config = load_config(
+            self._write(
+                """
+workspaces:
+  - name: first
+    workspace: full_a.nxs
+    selections:
+      - name: gold
+        selection: sel_gold.nxs
+        isotopes: [Au-197]
+      - name: alloy
+        mix:
+          - region: gold
+            fraction: 0.5
+          - workspace: second
+            region: silver
+            fraction: 0.5
+  - name: second
+    workspace: full_b.nxs
+    selections:
+      - name: silver
+        selection: sel_silver.nxs
+        isotopes: [Ag-107, Ag-109]
+""",
+            )
+        )
+
+        first = config.workspaces[0]
+        second = config.workspaces[1]
+        alloy = first.selections[1]
+
+        self.assertTrue(alloy.is_mixed)
+        self.assertEqual(len(alloy.mix), 2)
+        # The part that names another workspace resolves to that workspace.
+        self.assertEqual(alloy.mix[0].workspace, "first")
+        self.assertEqual(alloy.mix[1].workspace, "second")
+        self.assertEqual(alloy.mix[0].selection, first.selections[0].selection)
+        self.assertEqual(alloy.mix[1].selection, second.selections[0].selection)
+        # The isotopes come from the parts of both workspaces.
+        self.assertEqual(alloy.isotopes, ["Au-197", "Ag-107", "Ag-109"])
+
+    def test_mixed_region_rejects_an_unknown_workspace(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: alloy
+        mix:
+          - region: missing
+            fraction: 0.5
+          - workspace: nowhere
+            region: other
+            fraction: 0.5
+""",
+                )
+            )
+
+    def test_mixed_region_rejects_an_unknown_region_of_another_workspace(self):
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write(
+                    """
+workspaces:
+  - name: sample
+    workspace: full.nxs
+    selections:
+      - name: alloy
+        mix:
+          - selection: a.nxs
+            fraction: 0.5
+          - workspace: other
+            region: missing
+            fraction: 0.5
+  - name: other
+    workspace: full_b.nxs
+    selections:
+      - name: present
+        selection: sel.nxs
 """,
                 )
             )

@@ -9,8 +9,16 @@
 
 defaults:
   # Sample-detector distance (metres) used by convert_TOF_to_energy.
-  # Overridden per entry below or with the --l2 command line flag.
+  # This applies to every workspace, since a mixed region may take parts
+  # from several of them and they have to share the same energy axis.
+  # Overridden with the --l2 command line flag.
   l2: 0.6
+
+  # Optional: spread the samples over several sample-detector distances.
+  # The samples of each region are divided evenly between them, and the
+  # distance of each sample is stored in 'spectra_l2'. Remove this to use
+  # the single 'l2' value above.
+  # l2_values: [0.62, 0.63, 0.64, 0.65]
 
   # Fraction of each sample that is drawn from outside the selection region.
   # This is the "background" contribution; combined with a small n_samples it
@@ -27,8 +35,6 @@ defaults:
 workspaces:
   - name: Sn_letters_Bronze_sheet
     workspace: ../data/Sn_letters_Bronze_sheet_normMonitor.nxs
-    # Optional per-workspace override of the sample-detector distance.
-    # l2: 0.63
     selections:
       # A region holding a single isotope.
       - name: tin
@@ -57,3 +63,32 @@ workspaces:
         selection: ../data/sel_silver.nxs
         isotopes: [Ag-107, Ag-109]
         label: 3
+
+      # A region that mixes two other regions of this workspace together.
+      # The fractions give the share of the region covered by each part.
+      # The isotopes are derived from the parts, unless given explicitly.
+      - name: silver_gold
+        mix:
+          - region: silver
+            fraction: 0.7
+          - selection: ../data/sel_gold.nxs
+            fraction: 0.3
+        label: 4
+
+  # A part of a mixture may come from a different workspace, by naming it
+  # with the 'workspace' key. This builds training data for mixtures of
+  # isotopes that were never mounted together.
+  - name: Au_1foil
+    workspace: ../data/Au/Au_1foil_normMonitor.nxs
+    selections:
+      - name: gold
+        selection: ../data/Au/Au_1foil_normMonitor_selection_new.nxs
+        isotopes: [Au-197]
+      - name: silver_gold
+        mix:
+          - region: gold
+            fraction: 0.5
+          - workspace: Ag_normMonitor_selection
+            region: silver
+            fraction: 0.5
+        label: 5

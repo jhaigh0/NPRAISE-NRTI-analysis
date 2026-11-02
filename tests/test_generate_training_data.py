@@ -22,6 +22,9 @@ import generate_training_data as gtd
 
 N_PIXELS = 16
 N_BINS = 40
+# The generated data is rebinned onto the fixed energy grid, so the number of
+# output bins does not depend on the number of bins of the input workspace.
+N_OUTPUT_BINS = 1246
 SELECTION_DETECTOR_IDS = list(range(100, 140))
 SECOND_SELECTION_DETECTOR_IDS = list(range(140, 180))
 BACKGROUND_DETECTOR_IDS = list(range(180, 220))
@@ -149,18 +152,262 @@ workspaces:
         output_path = self.tmp_path / "out" / "test_workspace_tin_n5_noise0.1_l20.6.npz"
 
         with np.load(output_path) as data:
-            self.assertEqual(data["spectra_samples"].shape, (3, N_BINS))
-            self.assertEqual(data["x_bins"].shape, (N_BINS + 1,))
+            self.assertEqual(data["spectra_samples"].shape, (3, N_OUTPUT_BINS))
+            self.assertEqual(data["x_bins"].shape, (N_OUTPUT_BINS + 1,))
             self.assertEqual(str(data["name"]), "test_workspace")
             self.assertEqual(str(data["selection_name"]), "tin")
             self.assertEqual(list(data["isotopes"]), ["Sn-118", "Sn-120"])
             self.assertFalse(bool(data["is_background_only"]))
+            self.assertFalse(bool(data["is_mixed"]))
             self.assertEqual(int(data["label"]), 0)
             self.assertFalse(bool(data["label_is_null"]))
             self.assertEqual(int(data["n_samples"]), 5)
             self.assertEqual(int(data["n_sets"]), 3)
             self.assertAlmostEqual(float(data["noise_level"]), 0.1)
-            self.assertAlmostEqual(float(data["l2"]), 0.6)
+            np.testing.assert_allclose(data["l2_values"], [0.6])
+            self.assertEqual(data["spectra_l2"].shape, (3,))
+
+    def test_generates_a_mixed_region(self):
+        config_path = self.tmp_path / "config.yaml"
+        config_path.write_text(
+            """
+defaults:
+  l2: 0.6
+  noise_level: 0.1
+  n_sets: 3
+  n_samples: [5]
+
+workspaces:
+  - name: test_workspace
+    workspace: full_workspace.nxs
+    selections:
+      - name: tin
+        selection: sel_tin.nxs
+        isotopes: [Sn-118]
+      - name: silver
+        selection: sel_silver.nxs
+        isotopes: [Ag-107, Ag-109]
+      - name: alloy
+        mix:
+          - region: tin
+            fraction: 0.7
+          - region: silver
+            fraction: 0.3
+""",
+            encoding="utf-8",
+        )
+        output_dir = self.tmp_path / "out"
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = gtd.main(
+                [
+                    "--config",
+                    str(config_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--seed",
+                    "42",
+                ]
+            )
+        self.assertEqual(code, 0)
+
+        output_path = output_dir / "test_workspace_alloy_n5_noise0.1_l20.6.npz"
+        self.assertTrue(output_path.exists())
+
+        with np.load(output_path) as data:
+            self.assertEqual(data["spectra_samples"].shape, (3, N_OUTPUT_BINS))
+            self.assertTrue(bool(data["is_mixed"]))
+            self.assertEqual(list(data["mix_names"]), ["tin", "silver"])
+            np.testing.assert_allclose(data["mix_fractions"], [0.7, 0.3])
+            # The isotopes of a mixed region are those of its parts.
+            self.assertEqual(list(data["isotopes"]), ["Sn-118", "Ag-107", "Ag-109"])
+
+    def test_a_mixed_region_differs_from_its_parts(self):
+        config_path = self.tmp_path / "config.yaml"
+        config_path.write_text(
+            """
+defaults:
+  l2: 0.6
+  noise_level: 0.0
+  n_sets: 3
+  n_samples: [20]
+
+workspaces:
+  - name: test_workspace
+    workspace: full_workspace.nxs
+    selections:
+      - name: tin
+        selection: sel_tin.nxs
+        isotopes: [Sn-118]
+      - name: silver
+        selection: sel_silver.nxs
+        isotopes: [Ag-107]
+      - name: alloy
+        mix:
+          - region: tin
+            fraction: 0.5
+          - region: silver
+            fraction: 0.5
+""",
+            encoding="utf-8",
+        )
+        output_dir = self.tmp_path / "out"
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = gtd.main(
+                [
+                    "--config",
+                    str(config_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--seed",
+                    "42",
+                ]
+            )
+        self.assertEqual(code, 0)
+
+        with np.load(output_dir / "test_workspace_alloy_n20_noise0_l20.6.npz") as d:
+            alloy = d["spectra_samples"].copy()
+        with np.load(output_dir / "test_workspace_tin_n20_noise0_l20.6.npz") as d:
+            tin = d["spectra_samples"].copy()
+
+        self.assertFalse(np.array_equal(alloy, tin))
+
+    def test_generates_a_region_that_mixes_two_workspaces(self):
+        # A second, independent workspace to mix with.
+        other_ws = build_full_workspace()
+        other_full_path = self.tmp_path / "other_workspace.nxs"
+        SaveNexus(other_ws, Filename=str(other_full_path))
+        save_selection(
+            other_ws, SECOND_SELECTION_DETECTOR_IDS, self.tmp_path / "other_sel.nxs"
+        )
+
+        config_path = self.tmp_path / "config.yaml"
+        config_path.write_text(
+            """
+defaults:
+  l2: 0.6
+  noise_level: 0.0
+  n_sets: 3
+  n_samples: [20]
+
+workspaces:
+  - name: first
+    workspace: full_workspace.nxs
+    selections:
+      - name: tin
+        selection: sel_tin.nxs
+        isotopes: [Sn-118]
+      - name: alloy
+        mix:
+          - region: tin
+            fraction: 0.5
+          - workspace: second
+            region: silver
+            fraction: 0.5
+  - name: second
+    workspace: other_workspace.nxs
+    selections:
+      - name: silver
+        selection: other_sel.nxs
+        isotopes: [Ag-107, Ag-109]
+""",
+            encoding="utf-8",
+        )
+        output_dir = self.tmp_path / "out"
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = gtd.main(
+                [
+                    "--config",
+                    str(config_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--seed",
+                    "42",
+                ]
+            )
+        self.assertEqual(code, 0)
+
+        output_path = output_dir / "first_alloy_n20_noise0_l20.6.npz"
+        self.assertTrue(output_path.exists())
+
+        with np.load(output_path) as data:
+            self.assertEqual(data["spectra_samples"].shape, (3, N_OUTPUT_BINS))
+            self.assertTrue(bool(data["is_mixed"]))
+            self.assertEqual(list(data["mix_names"]), ["tin", "silver"])
+            self.assertEqual(list(data["mix_workspaces"]), ["first", "second"])
+            np.testing.assert_allclose(data["mix_fractions"], [0.5, 0.5])
+            # The isotopes come from the parts of both workspaces.
+            self.assertEqual(list(data["isotopes"]), ["Sn-118", "Ag-107", "Ag-109"])
+
+    def test_a_mixture_across_workspaces_is_a_weighted_combination(self):
+        other_ws = build_full_workspace()
+        other_full_path = self.tmp_path / "other_workspace.nxs"
+        SaveNexus(other_ws, Filename=str(other_full_path))
+        save_selection(
+            other_ws, SECOND_SELECTION_DETECTOR_IDS, self.tmp_path / "other_sel.nxs"
+        )
+
+        config_path = self.tmp_path / "config.yaml"
+        config_path.write_text(
+            """
+defaults:
+  l2: 0.6
+  noise_level: 0.0
+  n_sets: 4
+  n_samples: [200]
+
+workspaces:
+  - name: first
+    workspace: full_workspace.nxs
+    selections:
+      - name: tin
+        selection: sel_tin.nxs
+        isotopes: [Sn-118]
+      - name: alloy
+        mix:
+          - region: tin
+            fraction: 0.25
+          - workspace: second
+            region: silver
+            fraction: 0.75
+  - name: second
+    workspace: other_workspace.nxs
+    selections:
+      - name: silver
+        selection: other_sel.nxs
+        isotopes: [Ag-107, Ag-109]
+""",
+            encoding="utf-8",
+        )
+        output_dir = self.tmp_path / "out"
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = gtd.main(
+                [
+                    "--config",
+                    str(config_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--seed",
+                    "42",
+                ]
+            )
+        self.assertEqual(code, 0)
+
+        with np.load(output_dir / "first_alloy_n200_noise0_l20.6.npz") as d:
+            alloy = d["spectra_samples"].mean(axis=0)
+        with np.load(output_dir / "first_tin_n200_noise0_l20.6.npz") as d:
+            tin = d["spectra_samples"].mean(axis=0)
+        with np.load(output_dir / "second_silver_n200_noise0_l20.6.npz") as d:
+            silver = d["spectra_samples"].mean(axis=0)
+
+        # The mixture is the weighted combination of its parts, up to the
+        # counting noise of the sampled spectra.
+        expected = 0.25 * tin + 0.75 * silver
+        relative_error = np.abs(alloy - expected).sum() / expected.sum()
+        self.assertLess(relative_error, 0.1)
 
     def test_background_selection_is_marked_as_such(self):
         self._run()
@@ -196,7 +443,7 @@ workspaces:
         self.assertTrue(output_path.exists())
 
         with np.load(output_path) as data:
-            self.assertEqual(data["spectra_samples"].shape, (2, N_BINS))
+            self.assertEqual(data["spectra_samples"].shape, (2, N_OUTPUT_BINS))
             self.assertEqual(int(data["n_samples"]), 7)
             self.assertEqual(int(data["n_sets"]), 2)
             self.assertAlmostEqual(float(data["noise_level"]), 0.5)
