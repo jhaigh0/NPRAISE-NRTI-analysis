@@ -8,8 +8,8 @@ version = "0.1.0"
 [tasks]
 
 [dependencies]
-python = "3.12.*"
-mantidworkbench = ">=6.16.1,<7"
+python = "3.13.*"
+mantidworkbench = ">=7.0.0,<8"
 pre-commit = ">=4.6.1,<5"
 periodictable = ">=1.7.1,<2"
 scikit-learn = ">=1.9.0,<2"
