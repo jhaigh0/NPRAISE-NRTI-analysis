@@ -9,8 +9,8 @@ from endf_database_util.endf_database import ENDFDatabase, TotalCrossSectionData
 class ENDFDatabaseTests(unittest.TestCase):
     def test_get_total_cross_section_uses_cache(self):
         sample_text = ""
-        with open(Path(__file__).parent / "6-Li.txt") as f:
-            sample_text = f.read_text(encoding="utf-8")
+        with open(Path(__file__).parent / "6-Li_test.txt") as f:
+            sample_text = f.read()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir) / "cache"

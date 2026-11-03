@@ -1,0 +1,46 @@
+# Example dictionary configuration.
+#
+# A dictionary holds one entry per known component. Each entry is the average
+# measured spectrum of a region containing a single isotope, or a background
+# region.
+#
+# Paths are resolved relative to this file.
+#
+# Usage:
+#   python -m data_manipulation.build_dictionary \
+#       --config configs/example_dictionary.yaml \
+#       --output dictionary.npz
+
+# The sample-detector distances to convert the selections at. These should
+# match the values the data to be fitted was converted at. The L2 values
+# shift the energy axis by only a fraction of a bin, so an entry built from
+# several of them is valid at any of them.
+l2_values: [0.62, 0.63, 0.64, 0.65]
+
+# The selection regions to build entries from. Use this route when there is
+# no generated training data for a region yet.
+selections:
+  # A region holding a single isotope. The name is usually given as
+  # 'workspace/selection', so that the background regions of different
+  # workspaces stay separate.
+  - name: Ag/Ag
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Ag/Ag_normMonitor_selection.nxs
+    isotopes: [Ag-107, Ag-109]
+    workspace: Ag
+
+  - name: Au/Au
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Au/Au_1foil_normMonitor_selection_new.nxs
+    isotopes: [Au-197]
+    workspace: Au
+
+  # A region with no isotope present, i.e. background only. An empty
+  # isotope list marks it as background.
+  - name: Ag/background
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Ag/Ag_normMonitor_empty_selection.nxs
+    isotopes: []
+    workspace: Ag
+
+  - name: Au/background
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Au/Au_1foil_normMonitor_empty_selection.nxs
+    isotopes: []
+    workspace: Au
