@@ -267,3 +267,44 @@ The two sources can be combined in one configuration.
 > [!NOTE]
 > `generate_training_data_poc.py` is the original proof of concept, kept for
 > reference. It requires workspaces to already be loaded in Mantid.
+
+### Plotting the dictionary entries
+
+The reference spectra held in a dictionary can be plotted to inspect their
+shape, and in particular the Bragg peaks and absorption dips that tell one
+element from another:
+
+```bash
+python plot_dictionary.py dictionary.npz --view grid --output dictionary.png
+```
+
+Four views are available:
+
+| View | What it shows |
+| --- | --- |
+| `overlay` | Every entry on one pair of axes, for direct comparison |
+| `grid` | One panel per entry, each on its own scale |
+| `peaks` | One panel per entry, with a smooth baseline removed |
+| `difference` | Every entry minus a reference entry |
+
+The entries are measured on very different count scales, so plotting them
+raw hides the smaller ones. The `--normalise` option rescales them so
+they can be compared:
+
+| Normalisation | Effect |
+| --- | --- |
+| `none` | The raw counts are plotted |
+| `sum` | Each entry is divided by its total counts |
+| `baseline` | Each entry is divided by its smoothed profile, which keeps the absorption dips and Bragg peaks at their true relative depth |
+
+Other options are `--entries` to plot only some of the entries,
+`--x-min` and `--x-max` to restrict the energy range, and
+`--exclude-background` to leave out the entries that hold no isotope.
+
+For example, to compare the element entries on a common scale:
+
+```bash
+python plot_dictionary.py dictionary.npz \
+    --view overlay --normalise baseline --exclude-background \
+    --output elements.png
+```

@@ -1,0 +1,138 @@
+# Dictionary configuration for every single-element selection that has been
+# saved in the standards data.
+#
+# A dictionary holds one entry per known component. Each entry is the average
+# measured spectrum of a region containing a single isotope, or a background
+# region.
+#
+# Paths are resolved relative to this file.
+#
+# Usage:
+#   python -m data_manipulation.build_dictionary \
+#       --config configs/all_elements_dictionary.yaml \
+#       --output dictionary_all_elements.npz
+
+# The sample-detector distances to convert the selections at. These should
+# match the values the data to be fitted was converted at. The L2 values
+# shift the energy axis by only a fraction of a bin, so an entry built from
+# several of them is valid at any of them.
+l2_values: [0.62, 0.63, 0.64, 0.65]
+
+# The selection regions to build entries from.
+#
+# Only regions holding a SINGLE element are listed here. The multi-element
+# standards (Brass = Cu+Zn, Bronze sheet = Cu+Sn, SnPbSb = Sn+Pb+Sb,
+# SrTiO = Sr+Ti, Havar = Co/Cr/Ni/Fe/W/Mo/Mn, AISI 310) are deliberately
+# left out: a dictionary entry is meant to be a pure component, and a
+# mixture entry would be fitted as if it were a single substance. Mixtures
+# are recovered by fitting the pure entries against each other.
+selections:
+  # ------------------------------------------------------------------
+  # Silver. The Ag foil is 99.99% Ag, natural isotopic composition.
+  # ------------------------------------------------------------------
+  - name: Ag/Ag
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Ag/Ag_normMonitor_selection.nxs
+    isotopes: [Ag-107, Ag-109]
+    workspace: Ag
+
+  # A region of the Ag map with no sample in it, i.e. background only.
+  # An empty isotope list marks it as background.
+  - name: Ag/background
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Ag/Ag_normMonitor_empty_selection.nxs
+    isotopes: []
+    workspace: Ag
+
+  # ------------------------------------------------------------------
+  # Gold. The Au foil is 99.99% Au, so it is a single isotope.
+  # ------------------------------------------------------------------
+  - name: Au/Au_1foil
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Au/Au_1foil_normMonitor_selection_new.nxs
+    isotopes: [Au-197]
+    workspace: Au_1foil
+
+  # A region of the Au map with no sample in it, i.e. background only.
+  - name: Au/background
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Au/Au_1foil_normMonitor_empty_selection.nxs
+    isotopes: []
+    workspace: Au_1foil
+
+  # ------------------------------------------------------------------
+  # Iron. The Fe standard is 99.5% Fe, natural isotopic composition.
+  #
+  # The '7 foils' region is used rather than the '1 foil' region: the
+  # 1 foil selection has no resolvable structure at all (no bin of its
+  # spectrum departs from the smooth background by more than 5 sigma),
+  # whereas the 7 foil selection shows clear dips. The two have the same
+  # shape (correlation of the dip profiles is +0.999), so they differ
+  # only in how well the signal stands out.
+  # ------------------------------------------------------------------
+  - name: Fe/Fe_7f
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Fe/Fe_7f_normMonitor_selection.nxs
+    isotopes: [Fe-54, Fe-56, Fe-57, Fe-58]
+    workspace: Fe
+
+  # ------------------------------------------------------------------
+  # Indium. The In foil is 99.999% In, natural isotopic composition.
+  # ------------------------------------------------------------------
+  - name: In/In
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/In/In_normMonitor_selection.nxs
+    isotopes: [In-113, In-115]
+    workspace: In
+
+  # ------------------------------------------------------------------
+  # Zinc. The Zn standard is natural isotopic composition.
+  # ------------------------------------------------------------------
+  - name: Zn/Zn
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Zn/Zn_normMonitor_selection.nxs
+    isotopes: [Zn-64, Zn-66, Zn-67, Zn-68, Zn-70]
+    workspace: Zn
+
+  # ------------------------------------------------------------------
+  # Copper. The 'Cu letters' standard is 99.99% Cu, natural composition.
+  # ------------------------------------------------------------------
+  - name: Cu/Cu
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Cu_Bronze_Sn/Cu_Bronze_normMonitor_selection.nxs
+    isotopes: [Cu-63, Cu-65]
+    workspace: Cu_Bronze
+
+  # ------------------------------------------------------------------
+  # Niobium. The Nb disk is 99.9% Nb, natural isotopic composition.
+  #
+  # NOTE: this folder also holds a Sn foil, so please check that this
+  # region really is the Nb disk and not the foil before trusting the
+  # entry. The 'disk_left' selection is not used here because it holds
+  # only a single detector, which is too few to average over.
+  # ------------------------------------------------------------------
+  - name: Nb/Nb_disk_right
+    selection: ../../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps/Nb_disk_Sn_foil/Nb_normMonitor_selection_disk_right_selection.nxs
+    isotopes: [Nb-93, Nb-94, Nb-95]
+    workspace: Nb_disk_Sn_foil
+
+# ----------------------------------------------------------------------
+# Alternate selections that were left out.
+#
+# These regions hold the same element as an entry above, so adding them
+# would put two almost identical columns into the dictionary. The columns
+# are then nearly collinear, and the fit can put the whole abundance on
+# either one of them at random. Keep one entry per element and use these
+# instead if a region turns out to be better behaved.
+#
+#   Au/Au_2foil
+#     .../2Dmaps/Au/Au_2foil_normMonitor_selection_new.nxs   [Au-197]
+#
+#   Fe/Fe_1f
+#     .../2Dmaps/Fe/Fe_1f_normMonitor_selection.nxs
+#     isotopes: [Fe-54, Fe-56, Fe-57, Fe-58]
+#     (left out because the 1 foil region has no resolvable structure)
+#
+#   In/In_new
+#     .../2Dmaps/In/In_normMonitor_selection_new.nxs
+#     isotopes: [In-113, In-115]
+#
+# The following selections were also left out because they hold only a
+# single detector, which is too few to average over:
+#
+#   .../2Dmaps/Au/Au_1foil_normMonitor_selection.nxs
+#   .../2Dmaps/Au/Au_2foil_normMonitor_selection.nxs
+#   .../2Dmaps/Nb_disk_Sn_foil/Nb_normMonitor_selection_disk_left.nxs
+# ----------------------------------------------------------------------
