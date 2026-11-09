@@ -308,3 +308,106 @@ python plot_dictionary.py dictionary.npz \
     --view overlay --normalise baseline --exclude-background \
     --output elements.png
 ```
+
+## Reading the local ENDF database
+
+The project can read an ENDF/B-VIII.0 evaluation directly, which gives access
+to the resolved resonance parameters behind the absorption dips. Three modules
+work together:
+
+| Module | Purpose |
+| --- | --- |
+| `endf_database_util/local_endf.py` | Finds the database and parses the MF=2 resonance files |
+| `endf_database_util/resonance.py` | Reconstructs the cross-section (ENDF-102) from the resonance parameters |
+| `endf_database_util/rmatrix.py` | Handles the R-matrix (LRF=7) evaluations, e.g. Cu |
+
+The `endf` library is already a declared dependency in `pixi.toml`:
+
+````toml
+[pypi-dependencies]
+endf = { git = "https://github.com/paulromano/endf-python.git" }
+````
+
+### Locating the database
+
+`find_database_root()` searches the working directory and its parents for a
+directory containing `neutrons/n-*.endf`, so the usual layout
+
+````text
+../ENDF-B-VIII.0/ENDF-B-VIII.0/neutrons/n-063063.endf
+````
+
+is found automatically. An explicit path can always be given instead:
+
+````python
+from endf_database_util.local_endf import LocalENDFDatabase
+
+db = LocalENDFDatabase(root=r"..\ENDF-B-VIII.0\ENDF-B-VIII.0")
+print(db.available_isotopes()[:5])
+````
+
+### Reconstructing a cross-section
+
+The MF=3 tabulated cross-sections have only a handful of points in the
+resonance region, so the dips cannot be resolved from them. The MF=2
+resolved resonance parameters are therefore reconstructed according to
+ENDF-102 (SLBW/MLBW, Reich-Moore and R-matrix):
+
+````python
+import numpy as np
+
+from endf_database_util.local_endf import LocalENDFDatabase
+from endf_database_util.resonance import total_cross_section
+from endf_database_util.rmatrix import RMatrixParameters, rmatrix_total_cross_section
+
+db = LocalENDFDatabase()
+energies = np.linspace(1.0, 500.0, 20000)
+
+params = db.resonance_parameters("Cu", 65)
+if isinstance(params, RMatrixParameters):
+    result = rmatrix_total_cross_section(params, energies)
+else:
+    result = total_cross_section(params, energies)
+
+print(result.total.max(), "barns")
+````
+
+### Why the resonance energies matter
+
+The dips in a measured profile are at the **resonance** energies, so they can
+be matched directly against the ENDF evaluation:
+
+| Element | Resonance energies (eV) |
+| --- | --- |
+| Ag | 5.190, 16.300, 30.600, 51.560, 55.800, 71.000, 87.700 |
+| Au | 4.900, 60.291 |
+| In | 1.457, 3.850, 9.070, 12.040, 15.025, 22.730, 24.990, 39.610 |
+| Zn | 223.100 (Zn-67), 281.000 (Zn-64), 448.200 (Zn-67) |
+| Nb | 194.250, 378.470 |
+| Cu | 230.044 (Cu-65) |
+
+> [!NOTE]
+> Use the **natural isotope mixture** when simulating a metal sample, not a
+> single isotope. The copper dip at ~230 eV is the Cu-65 R-matrix resonance;
+> Cu-63 has no resonance below 400 eV.
+
+### Comparing a measured profile with a cross-section
+
+Measured profiles are *transmissions* (dips), while cross-sections are *peaks*.
+Convert the measured profile to optical thickness before comparing:
+
+````python
+import numpy as np
+from scipy.ndimage import median_filter
+
+positive = profile[profile > 0]
+reference = np.median(positive)
+optical_thickness = -np.log(np.maximum(profile / reference, 1e-12))
+
+residuals = optical_thickness - median_filter(optical_thickness, size=51)
+````
+
+The residual of the measured profile can then be correlated with the
+reconstructed cross-section to identify the element. Doing this with the local
+ENDF database alone identifies Ag, Au, In, Zn, Cu and Nb correctly; the Fe
+entry in the dictionary is known to be noise and is not identified.
