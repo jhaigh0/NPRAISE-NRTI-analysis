@@ -411,3 +411,505 @@ The residual of the measured profile can then be correlated with the
 reconstructed cross-section to identify the element. Doing this with the local
 ENDF database alone identifies Ag, Au, In, Zn, Cu and Nb correctly; the Fe
 entry in the dictionary is known to be noise and is not identified.
+
+### Fitting a region against the ENDF database
+
+`data_manipulation/fit_endf.py` fits a measured region against the
+cross-sections of a list of elements, without needing a dictionary of
+measured spectra at all. It is the theoretical counterpart of
+`fit_abundances.py`.
+
+The model is the transmission law
+
+````text
+T(E) = exp(-sum_i c_i * sigma_i(E))
+````
+
+where `sigma_i` is the reconstructed cross-section of element `i` and `c_i`
+is its areal density. The fit is a non-negative least squares fit of this
+model to the measured transmission, with a Gaussian broadening of the
+templates fitted alongside it, because the detector's energy resolution is
+not known exactly.
+
+**The fit needs only a profile and an energy grid.** It does not need a
+dictionary: the dictionary is just one way of holding the measured
+regions, and it is the *measured dictionary* route that needs one.
+
+```python
+import numpy as np
+
+from data_manipulation.fit_endf import fit_region
+from endf_database_util.templates import build_fine_templates
+
+# A profile is one transmission spectrum, and the energies are the bin
+# centres in eV.
+energies = np.sqrt(x_bins[:-1] * x_bins[1:]) / 1000.0
+templates = build_fine_templates(["Ag", "Au", "In", "Zn", "Cu", "Nb", "Fe"], energies)
+
+result = fit_region(
+    profile,
+    ["Ag", "Au", "In", "Zn", "Cu", "Nb", "Fe"],
+    energies=energies,
+    templates=templates,
+)
+print(result.dominant)             # 'Cu'
+print(dict(zip(result.symbols, result.fractions)))
+```
+
+From the command line, a raw selection workspace can be fitted directly:
+
+````bash
+python -m data_manipulation.fit_endf \
+    --workspace "path/to/Havar_5foils_div_Empty_normMonitor_selection.nxs=Havar/Havar_5foils" \
+    --elements Co Cr Ni W Mo Mn Fe \
+    --output endf_fits.csv
+````
+
+The name after the `=` is the name of the region, and it is used to look
+the metadata and the known composition up. `--l2` may be given more than
+once, and the profiles of the conversions are averaged.
+
+The regions of a dictionary can be fitted instead, which is convenient
+when the dictionary has already been built:
+
+````bash
+python -m data_manipulation.fit_endf \
+    --dictionary dictionary_all_elements.npz \
+    --elements Ag Au In Zn Cu Nb Fe \
+    --exclude-background \
+    --output endf_fits.csv
+````
+
+Use `--region` to fit only some of the regions, and `--output` to write the
+results to a CSV file. The CSV holds the dominant element, the residual, the
+fitted broadening, and the fraction, areal density and correlation of each
+element.
+
+> [!NOTE]
+> The templates are cached on disk under
+> `endf_database_util/.cache/templates/`, so only the first run is slow.
+> Building the templates for all seven elements takes about fifteen seconds;
+> a cached run takes about a tenth of a second.
+
+> [!NOTE]
+> The **fractions** are the shares of the modelled optical thickness, not
+> the shares of the areal density. The elements have very different
+> cross-section magnitudes, so an element with a small cross-section needs a
+> large areal density to make the same dip. The areal densities are
+> reported separately.
+
+> [!IMPORTANT]
+> The cross-sections are evaluated on a grid **sixty times finer** than the
+> measurement grid, and are sampled back onto it after the broadening. This
+> matters: the measurement grid has a step of about 0.5 %, which is 1.15 eV
+> at 230 eV, and that badly undersamples the narrow resonances. The
+> copper-65 resonance at 230 eV has a peak of 81 barns, but only 15 barns
+> are seen when it is evaluated on the measurement grid, and the niobium
+> resonance at 378 eV loses a factor of nine. Use
+> `build_fine_templates` rather than `build_templates` when the templates
+> are to be compared with a measured spectrum.
+
+### Identifying the measured regions
+
+Fitting every measured region of the dictionary against the local ENDF
+database gives the correct element for six of the seven regions:
+
+| Region | Dominant | Fraction | Broadening |
+| --- | --- | --- | --- |
+| `Ag/Ag` | Ag | 0.976 | 1.0% |
+| `Au/Au_1foil` | Au | 1.000 | 1.0% |
+| `In/In` | In | 1.000 | 1.0% |
+| `Zn/Zn` | Zn | 1.000 | 1.0% |
+| `Cu/Cu` | Cu | 0.982 | 0.2% |
+| `Nb/Nb_disk_right` | Nb | 1.000 | 0.5% |
+| `Fe/Fe_7f` | Ag | 0.680 | 3.0% |
+
+The iron region is the one that was already known to hold only noise, so
+there is nothing there for the fit to find.
+
+### Multi-element standards
+
+The same fit can be applied to the multi-element standards. The Havar
+standard is a Co/Cr/Ni/W/Mo/Mn/C/Be/Fe alloy, and the SrTiO standard is
+strontium titanate. Their selection workspaces are not part of the
+single-element dictionary, so they are fitted directly:
+
+````python
+import numpy as np
+from pathlib import Path
+from mantid.simpleapi import Load
+
+from data_loading.load_and_normalise import convert_TOF_to_energy
+from data_manipulation.fit_endf import fit_region
+from endf_database_util.templates import build_templates
+
+base = Path("../NPRAISE - standards/NPRAISE - standards/Normalised nGEM data/2Dmaps")
+workspace = Load(
+    str(base / "Havar/Havar_5foils_div_Empty_normMonitor_selection.nxs"),
+    OutputWorkspace="Havar_selection",
+    StoreInADS=False,
+)
+
+profiles = []
+for l2 in [0.62, 0.63, 0.64, 0.65]:
+    converted = convert_TOF_to_energy(workspace, l2=l2, output_name=f"havar_{l2:g}")
+    profiles.append(converted.extractY().mean(axis=0))
+    x_bins = converted.readX(0).copy()
+
+profile = np.mean(profiles, axis=0)
+energies = np.sqrt(x_bins[:-1] * x_bins[1:]) / 1000.0
+elements = ["Co", "Cr", "Ni", "W", "Mo", "Mn", "C", "Be", "Fe"]
+templates = build_templates(elements, energies)
+
+result = fit_region(profile, elements, templates=templates)
+print(result.dominant)          # 'Co'
+print(result.excluded)          # ['C', 'Be']
+````
+
+The result for Havar is:
+
+| Element | Fitted mass % | Wikipedia mass % |
+| --- | --- | --- |
+| Co | 87.4 | 42.0 |
+| W | 6.1 | 2.7 |
+| Mo | 3.3 | 2.2 |
+| Mn | 3.2 | 1.6 |
+| Cr | 0.0 | 19.5 |
+| Ni | 0.0 | 12.7 |
+| Fe | 0.0 | 19.05 |
+| C | not identifiable | 0.2 |
+| Be | not identifiable | 0.05 |
+
+Cobalt is found, and it dominates because the **Co-59 resonance at 132 eV is
+very wide** (Γt = 5.74 eV), so it produces the broad absorption band that
+peaks at ~130 eV in the measured profile.
+
+The other elements are not found because **they have no resolved resonances
+between 1 and 500 eV**. Chromium, nickel and iron have only a smooth
+continuum there (about 2.1, 0.75 and 0.67 barns, nearly flat), and their
+templates are too similar to each other to be told apart. Carbon and
+beryllium have a cross-section of exactly zero, so they carry no information
+at all; the fit leaves them out and reports them separately.
+
+The same applies to SrTiO: the **Sr resonance at 3.52 eV** matches the
+observed dip at 3.52 eV exactly, so strontium is found, but titanium has no
+resonances in this range and oxygen has a zero cross-section.
+
+### Saturated dips
+
+A deep dip does not reach zero transmission: it is limited by the background
+and by the detector, so it flattens out at some level above zero. The fit
+therefore has a floor term,
+
+````text
+T(E) = floor + (1 - floor) * exp(-sum_i c_i * sigma_i(E))
+````
+
+The floor is estimated from the profile: it is the smallest transmission,
+but only when the bottom of the dip is genuinely flat, so that a sharp
+unsaturated dip is not mistaken for a saturated one. It can also be set
+explicitly with the `floor` argument or the `--floor` option.
+
+The result carries a `saturated` flag, which is set when the floor is
+non-zero. **When the dip is saturated, the depth of the dip carries no
+information about the amount of material**, so the fitted abundances are
+not quantitative. Only the wings of the dip, where the transmission is
+still well above the floor, carry the amplitude information.
+
+There are three ways to deal with this, in increasing order of reliability.
+
+**Leave the saturated bins out.** The `unsaturated_only` argument (the
+`--unsaturated-only` option) leaves out the bins that are pinned at the
+floor, and fits only the wings. The result reports how many bins were used
+in `unsaturated_bins`.
+
+**Fit the resonances and the continuum separately.** The `separate_continuum`
+argument (the `--separate-continuum` option) splits each cross-section into
+its narrow resonances and its smooth continuum, and fits them with separate
+coefficients. This is because the wings of a resonance look exactly like a
+continuum, so when the two are fitted together the amplitude of the
+resonance trades off against the continuum. The result then reports
+`resonance_areal_densities` and `continuum_areal_densities` separately.
+
+**Constrain the composition.** The `fixed_composition` argument (the
+`--composition` option) holds the composition of the sample fixed and fits
+only the overall amount of material. This is the most reliable of the three,
+because the shape of the dip is then fixed and only its amplitude is
+fitted, so the saturated bottom cannot bias the answer.
+
+> [!IMPORTANT]
+> The Havar Co dip is saturated: the profile bottoms out at a transmission
+> of 0.0405 over 119–144 eV, and the Co resonance implies a peak optical
+> thickness of about 96, far above the 3.2 that the measurement can
+> resolve. The 87 % cobalt figure from a free fit is therefore **not** a
+> measurement of the cobalt content.
+>
+> With the composition held fixed at the known values, the fit recovers
+> the cobalt areal density exactly: **N·t_Co = 0.007140** atoms per barn,
+> against 0.007140 from the reference fit. The total areal density comes
+> out at 0.017152 against 0.01715. The free fit gives 0.007676, which is
+> 7.5 % high.
+>
+> The resonance-plus-continuum split is *not* the answer here. It is
+> unbiased on synthetic data, but on the real Havar data it is 32 % off,
+> because the measured band is about four times broader than the ENDF
+> cobalt resonance. The split model has a genuine degeneracy that the
+> free fit exploits.
+
+### Sample metadata: how much of each element
+
+The free fit answers *which elements are present*. The metadata is what
+turns it into *how much of each element*, because the depth of a dip gives
+the product of the amount of material and the cross-section, and only the
+metadata breaks that degeneracy.
+
+`data_manipulation/sample_metadata.py` holds that metadata: the thickness
+of each sample, its composition, its density and its measured floor. It
+can be read from a YAML file or from the Excel spreadsheet of the
+standards, and `configs/standards_metadata.yaml` holds the metadata of the
+standards as it is currently known.
+
+The amount of material is worked out from the thickness, the density of
+the sample and the mean molar mass of its composition:
+
+````text
+mass per unit area  = density * thickness
+mean molar mass      = sum_i (number fraction_i * atomic mass_i)
+atoms per barn       = mass per unit area / mean molar mass * N_A / 1e24
+````
+
+The density of a mixture is the mass weighted harmonic mean of the
+densities of its elements, which is what the code uses when the density is
+not given.
+
+#### Three modes
+
+| Mode | Needs | Answers | Frees |
+| --- | --- | --- | --- |
+| **Discovery** (the default) | nothing | which elements | everything |
+| **Fixed amount** | thickness + composition | the relative abundance | the proportions |
+| **Fixed composition** | the composition | the amount of material | the amount |
+
+The **fixed amount** mode is the one that answers "the thickness and the
+elements are known, but what are the ratios?". The amount of material is
+pinned by the metadata, and the fit finds the proportions on the simplex,
+so they always sum to one and are all positive. Because the depth of the
+dip is fixed rather than fitted, the proportions are determined by the
+*shape* of the dip, which is far more robust when the dip is saturated.
+
+````python
+from data_manipulation.fit_endf import fit_region
+from data_manipulation.sample_metadata import load_metadata
+
+metadata = load_metadata("configs/standards_metadata.yaml")
+havar = metadata["Havar/Havar_5foils"]
+
+result = fit_region(
+    profile, ["Co", "Cr", "Ni", "W", "Mo", "Mn", "Fe"],
+    templates=templates,
+    fixed_amount=havar,
+)
+print(dict(zip(result.symbols, result.mass_fractions)))
+````
+
+From the command line:
+
+````bash
+python -m data_manipulation.fit_endf \
+    --dictionary dictionary_all_elements.npz \
+    --elements Ag Au In Zn Cu Nb Fe \
+    --metadata configs/standards_metadata.yaml \
+    --fixed-amount \
+    --output endf_fits.csv
+````
+
+Regions with no metadata are skipped rather than being an error. The CSV
+gains a `mass_fraction_<element>` column for each element.
+
+> [!NOTE]
+> The **fractions** are the shares of the modelled optical thickness. The
+> **mass fractions** are the shares by mass, which is the usual way a
+> composition is quoted. They are different things, because the elements
+> have very different cross-sections. Both are reported.
+
+> [!IMPORTANT]
+> The metadata is only as good as the sample it describes, and some of the
+> standards do not agree with themselves. The gold foil is the clearest
+> case: its mass and area imply a thickness of 0.27 mm, but the stated
+> thickness is 0.02 mm, a factor of 13.7 apart. The `Measured std` sheet
+> also marks `Phosp. Bronze` and `SnPbSb` as **"not realiable"**, so no
+> metadata is given for them.
+>
+> The absolute calibration is still not good enough to quote an areal
+> density to better than about 10–20 %. On the single-element foils the
+> fitted areal density is 0.84 to 0.95 of the value the metadata
+> predicts, and the shortfall is worst for the thickest samples. The
+> dominant cause is the energy resolution: the time-of-flight binning
+> gives a resolution that grows as the square root of the energy, and the
+> fit has to approximate it. The code tries the calculated flight-path
+> resolution alongside the constant broadenings, which improves the
+> calibration, but it does not remove it.
+
+### Isotopes
+
+A sample does not have to hold the natural isotopic composition of an
+element. Enriched material, and material made from separated isotopes, are
+both common, and **the resonances of the isotopes of an element sit at
+different energies**, so they can be told apart.
+
+This is what makes the technique more than an elemental analysis. The
+resonances of the two stable isotopes of silver, for example, do not
+overlap at all:
+
+| Isotope | Strongest resonances (eV) | Peak cross-section |
+| --- | --- | --- |
+| Ag-107 | 16.3, 51.6, 202.4 | 5 558 barns |
+| Ag-109 | 5.19, 30.6, 71.0, 133.9 | 34 197 barns |
+
+The isotopes are fitted by giving their names instead of the element name:
+
+```python
+from endf_database_util.templates import build_fine_isotope_templates
+from data_manipulation.fit_endf import fit_region
+
+templates = build_fine_isotope_templates(["Ag-107", "Ag-109"], energies)
+
+result = fit_region(
+    profile, ["Ag-107", "Ag-109"], templates=templates
+)
+print(result.atomic_fractions)   # the share of the atoms
+print(result.mass_fractions)     # the share by mass
+print(result.isotopes)           # {'Ag-107': 107, 'Ag-109': 109}
+```
+
+From the command line:
+
+````bash
+python -m data_manipulation.fit_endf \
+    --dictionary dictionary_all_elements.npz \
+    --isotopes Ag-107 Ag-109 \
+    --output isotope_fits.csv
+````
+
+The CSV gains an `atomic_fraction_<isotope>` column for each isotope.
+
+> [!NOTE]
+> The **atomic fractions** are the share of the atoms, which is the usual
+> way an isotopic composition is quoted. The **mass fractions** are the
+> share by mass. The `fractions` are shares of the modelled optical
+> thickness, which is a third thing and is usually not what you want for
+> isotopes.
+
+#### The silver flake test
+
+The `Ag_Pb_Isotopes_normMonitor.nxs` standard holds flakes of the two
+separated silver isotopes. Fitting the two connected regions of the
+sample gives:
+
+| Region | Ag-107 (atomic) | Ag-109 (atomic) |
+| --- | --- | --- |
+| the larger flake | 92.2 % | 7.8 % |
+| the smaller flake | 0 % | 100 % |
+
+The two flakes are cleanly separated, which is the point of the test: the
+same element, the same energy range, but told apart by the position of
+the resonances rather than by the element itself.
+
+> [!IMPORTANT]
+> The isotopes can only be told apart when their resonances do not
+> overlap. That is a property of the element, not of the code, and it
+> does not hold for every element. The isotopes of silver are an
+> unusually good case.
+
+### The sample metadata
+
+The file `Standard with nGEM.xlsx`, next to the data, records the
+thickness and the composition of every standard. The `Details` sheet gives
+the mass, the thickness, the area and the stable isotopes of each sample,
+and the `Measured std` sheet gives the thickness in millimetres and the
+number of foils. This is what makes the fits quantitative, because the
+expected areal density of each element can be worked out from the
+thickness and the density.
+
+| Sample | Composition | Thickness |
+| --- | --- | --- |
+| Au foil | Au-197 (100%) | 0.02 mm (1 foil), 0.04 mm (2 foils) |
+| Brass | Cu-63 (69.15%), Cu-65 (30.85%) | 0.1, 0.6, 1.2, 2.0 mm |
+| Bronze sheet | Cu 94%, Sn 6% | 2 mm |
+| Havar | Co 42.5%, Cr 20%, Ni 13%, Fe, W, Mo, Mn | 2.5 mm (5 foils) |
+| Fe | Fe 99.5% | 0.25 mm (1 foil), 1.75 mm (7 foils) |
+| Zn | Zn | 2 mm |
+| Nb | Nb 99.9% | 0.25 mm (1 disk), 0.75 mm (3 disks) |
+| In | In-113 (4.29%), In-115 (95.71%) | 0.2 mm |
+| SrTiO | Sr, Ti, O | 2.14 g of powder |
+| SnPbSb | Sn 60%, Pb 39%, Sb 1% | 0.1 mm |
+
+The fit reproduces the known composition of the phosphor bronze sheet to
+within a few per cent: **Cu 94.0% and Sn 6.0%**, against the nominal
+Cu 94 / Sn 6.
+
+> [!NOTE]
+> The thickness series are the way to deal with a saturated dip. A dip
+> that is clipped at the floor carries no information about the amount of
+> material, but the same sample measured at a thinner setting does. The
+> gold foils are the clearest case: the one-foil measurement bottoms out
+> at a transmission of 0.071, and the two-foil measurement at 0.038, so
+> the floor can be solved for from the pair.
+
+> [!WARNING]
+> Two of the files are duplicates of each other: `Brass_5f_normMonitor_
+> selection.nxs` and `Brass_20f_normMonitor_selection.nxs` hold exactly
+> the same data, so the 20-foil brass is not actually measured.
+
+### What the energy range can and cannot do
+
+The energy range of the data limits which elements can be identified, but
+**extending it above 500 eV does not help**. The 500 eV limit is only the
+rebin parameter (`"1000,-0.005,500000"`); the raw data spans 0.718 eV to
+2.87 MeV with good statistics. Fitting the Havar standard at 500, 1000,
+2000, 3000 eV and at 2.0 and 2.9 MeV gives the same answer every time:
+cobalt at about 88 %, and no chromium, nickel or iron at all.
+
+The reason is that **chromium, nickel and iron have no resonances at all
+between 500 and 1000 eV**. Their first resonances are at 1151 eV (Fe),
+1290 eV (Ni) and 1626 eV (Cr), and by then the detector's energy
+resolution has degraded too far to resolve them. The nGEM flight path is
+22.17 m with 1 µs time bins, so the relative resolution is
+
+````text
+dE/E = 2 * dt / t = 2 * dt * sqrt(E / (2 * m * L))
+````
+
+which is 0.0012 at 1 eV but 0.028 at 500 eV and 0.050 at 1626 eV. The
+visibility of a resonance, the ratio of its width to the resolution, is
+therefore:
+
+| Element | Resonance | Γt/E | dE/E | Visibility |
+| --- | --- | --- | --- | --- |
+| Ag | 5.2 eV | 0.359 | 0.0012 | 300 |
+| Au | 4.5 eV | 0.323 | 0.0012 | 270 |
+| Mn | 340.8 eV | 3.068 | 0.023 | 133 |
+| Co | 132.0 eV | 3.033 | 0.013 | 233 |
+| Fe | 1151 eV | 0.013 | 0.042 | 0.31 |
+| Ni | 1290 eV | 0.009 | 0.044 | 0.20 |
+| Cr | 1626 eV | 0.004 | 0.050 | 0.08 |
+
+The resolution gets *worse* as the energy rises, because the flight time
+grows as the square root of the energy while the time bins stay fixed. The
+chromium, nickel and iron resonances above 500 eV are 25 to 250 times too
+narrow to be seen.
+
+The elements with usable resonances between 1 and 500 eV are Ag, Au, In,
+Zn, Cu, Nb, Co, W, Mo, Mn and Sr. The others need a different measurement
+rather than a different energy range: a better-resolution instrument, a
+different modality, or the measured-dictionary route of
+`fit_abundances.py`.
+
+> [!NOTE]
+> The low-energy region does carry different information, because the
+> resonances of tungsten and molybdenum are dense there. Fitting the Havar
+> standard over 1–80 eV gives cobalt 66 %, tungsten 20 % and molybdenum
+> 15 %, where the full range gives cobalt 88 %. Chromium, nickel and iron
+> remain at zero in every case, because their 1/v continua are too similar
+> to each other to be told apart: the chromium and nickel templates
+> correlate at +0.57 over the whole range and at +0.999 below 20 eV.

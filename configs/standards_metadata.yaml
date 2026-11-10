@@ -1,0 +1,122 @@
+# Metadata about the measured standards.
+#
+# The metadata says how much material each sample has, which is what
+# breaks the degeneracy between the amount of material and the
+# cross-section. It is optional: without it, the fit can still say which
+# elements are present, but not how much of each.
+#
+# Every entry is keyed by the name of a region of a dictionary, so that
+# the metadata is found by name.
+#
+# The fields of an entry:
+#   thickness_mm   the thickness of the sample, in millimetres
+#   thickness_cm   the thickness of the sample, in centimetres
+#   composition    the mass fraction of each element, in percent
+#   density        the density of the sample, in g/cm3. It is worked out
+#                  from the composition when it is not given.
+#   area_cm2       the area of the sample, in square centimetres
+#   mass_g         the mass of the sample, in grams
+#   floor          the transmission floor of this measurement, which is
+#                  the ratio of the sample side to the empty side
+#                  background. It is specific to each measurement.
+#   notes          free text
+#
+# The compositions come from the 'Standard with nGEM.xlsx' spreadsheet.
+# The thicknesses are the nominal ones from the 'Measured std' sheet.
+#
+# NOTE: the 'Measured std' sheet marks 'Phosp. Bronze' and 'SnPbSb' as
+# 'not realiable', so no metadata is given for them here. The brass
+# samples of the 'Measured std' sheet are the 'Brass (1 foil)' of the
+# 'Details' sheet, which is 2 mm thick.
+
+Ag/Ag:
+  thickness_mm: 0.25
+  composition:
+    Ag: 99.95
+  notes: silver 99.95% foil, 25x25 mm
+
+Ag/background:
+  notes: the background region of the silver sample
+
+Au/Au_1foil:
+  thickness_mm: 0.02
+  composition:
+    Au: 100.0
+  mass_g: 0.13197
+  area_cm2: 0.25
+  notes: gold foil, 50x50 mm. The mass and the area do not agree with the thickness, so the thickness is used.
+
+Au/Au_2foil:
+  thickness_mm: 0.04
+  composition:
+    Au: 100.0
+  notes: two gold foils, 50x50 mm
+
+Au/background:
+  notes: the background region of the gold sample
+
+Fe/Fe_1f:
+  thickness_mm: 0.25
+  composition:
+    Fe: 99.5
+  notes: iron 99.5% foil, 50x50 mm
+
+Fe/Fe_7f:
+  thickness_mm: 1.75
+  composition:
+    Fe: 99.5
+  notes: seven iron foils, 50x50 mm
+
+In/In:
+  thickness_mm: 0.2
+  composition:
+    In: 99.999
+  notes: indium 99.999% foil, 25x25 mm
+
+Zn/Zn:
+  thickness_mm: 2.0
+  composition:
+    Zn: 100.0
+  notes: zinc, 50x50 mm
+
+Cu/Cu:
+  thickness_mm: 0.25
+  composition:
+    Cu: 99.99
+  notes: copper 99.99%+, 100x100 mm
+
+Nb/Nb_disk_right:
+  thickness_mm: 0.25
+  composition:
+    Nb: 99.9
+  notes: niobium 99.9% disk
+
+Havar/Havar_5foils:
+  thickness_mm: 2.5
+  composition:
+    Co: 42.5
+    Cr: 20.0
+    Ni: 13.0
+    Fe: 19.05
+    W: 2.7
+    Mo: 2.2
+    Mn: 1.6
+  floor: 0.0405
+  notes: >
+    A cobalt alloy. The dip at 130 eV is saturated, so the depth of the
+    dip carries no information about the amount of material.
+
+Brass/Brass_1f:
+  thickness_mm: 2.0
+  composition:
+    Cu: 63.0
+    Zn: 37.0
+  notes: Cu63/Zn37 brass, 50x50 mm
+
+SrTiO/SrTiO:
+  composition:
+    Sr: 57.9
+    Ti: 42.1
+  notes: >
+    SrTiO powder, 2.14 g. The thickness is not known, because it is a
+    powder rather than a solid sample.
