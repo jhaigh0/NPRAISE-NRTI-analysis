@@ -913,3 +913,118 @@ different modality, or the measured-dictionary route of
 > remain at zero in every case, because their 1/v continua are too similar
 > to each other to be told apart: the chromium and nickel templates
 > correlate at +0.57 over the whole range and at +0.999 below 20 eV.
+
+### Finding what is in an unknown sample
+
+The last sections assume that somebody already knows which elements are in
+the sample. When the sample is genuinely unknown, the fit has to decide
+that for itself.
+
+**The energy range does the pruning.** A nuclide that has no resonance
+between 1 and 500 eV leaves no trace in the spectrum, so it cannot be
+found and does not need to be fitted for. Scanning the ENDF database for
+the nuclides that do have a resonance in the range leaves **60 elements
+with a natural abundance** (and 191 isotopes). This is the whole candidate
+list, and it is small enough to fit all at once.
+
+`endf_database_util/discovery.py` performs the scan:
+
+````python
+from endf_database_util.discovery import scan_database
+
+result = scan_database(1.0, 500.0)
+print(result.element_count)    # 60
+print(result.isotope_count)    # 191
+print(result.resonance_count)  # 12045
+print(result.elements[:10])
+````
+
+The scan reads every file in the database and takes about ninety seconds.
+It is cached on disk, so it is only paid once, and afterwards the same
+call takes about twenty milliseconds.
+
+The candidates are the elements that have a resonance in the range **and**
+a natural abundance. The second condition removes the elements that could
+never be in a natural sample: americium, berkelium, californium,
+curium, neptunium, promethium, polonium, plutonium, radium and
+technetium. It also removes sodium, nickel and yttrium, whose only
+resonances in the range belong to the radioactive isotopes sodium-22,
+nickel-59 and yttrium-90.
+
+The command line does the whole thing in one step:
+
+````shell
+python -m data_manipulation.fit_endf \
+    --workspace "Havar/Havar_5foils_div_Empty_normMonitor_selection.nxs" \
+    --discover \
+    --output havar_discovery.csv
+````
+
+`--discover` fits every candidate element, and `--discover-isotopes` fits
+every candidate isotope instead. On the Havar standard the element route
+finds cobalt at 92 %, with tungsten, manganese and molybdenum as the
+smaller components, and finds nothing for chromium, nickel or iron, which
+is the correct answer: none of them has a resonance in the range.
+
+> [!NOTE]
+> The full isotope route is also practical. Fitting all 191 candidate
+> isotopes at once takes about ten seconds, and all 366 nuclides with a
+> resonance in the range take about twenty. The templates of the
+> candidates are well separated from each other, so the fit is not
+> degenerate.
+
+> [!IMPORTANT]
+> An element that has no resonance in the measured range cannot be found,
+> and it cannot be ruled out either. Its smooth 1/v continuum can hide
+> behind that of another element, and the fit gives it a share of zero
+> rather than saying that it is absent. This is a limitation of the
+> measurement, not of the fit, and it is why the spectrum below 500 eV
+> cannot tell chromium, nickel and iron apart.
+
+#### Having a resonance is necessary, but not sufficient
+
+A resonance in the measured range is only the *first* requirement. The
+resonance also has to survive the resolution of the instrument, and it
+must not be blended with the resonance of another element.
+
+The nGEM flight path is 22.17 m with 1 µs time bins, so the relative
+resolution is 0.00125 at 1 eV, 0.0189 at 230 eV and 0.0274 at 480 eV.
+A resonance much narrower than that is smeared away. The useful measure
+is the **modulation of the resonance above the local continuum, after the
+instrument has smeared it**:
+
+| Element | Resonance | Peak σ | Modulation | Findable? |
+| --- | --- | --- | --- | --- |
+| Sn | 38.8 eV | 1915 b | 75 % | yes |
+| Ag | 5.2 eV | 16472 b | 73 % | yes |
+| Cu | 230.0 eV | 80.8 b | 67 % | yes, but see below |
+| Au | 4.9 eV | 36821 b | 63 % | yes |
+| Zn | 223.1 eV | 199 b | 49 % | yes |
+| Fe | 230.0 eV | 1.6 b | 33 % | marginally |
+| Co | 132.0 eV | 10537 b | 3 % | yes |
+| Pb | 480.0 eV | 10.9 b | 3 % | **no** |
+| Mn | 340.8 eV | 3254 b | 1 % | **no** |
+
+Lead is the clearest example of a resonance that is present but useless.
+Lead-204 has one resonance in the range, at 480 eV, but the cross-section
+there is 10.87 b against a continuum of 10.18 b, so the resonance only
+modulates the cross-section by 6.8 %. The feature is 0.40 eV wide and the
+resolution at 480 eV is 13.1 eV, so after smearing the modulation is
+**0.1 %**. A simulated sample of pure lead cannot be recovered at all.
+
+Copper is the interesting middle case. Its resonance at 230.04 eV is
+strongly visible, and the copper-bronze standard shows a clean dip at
+230.19 eV that is 12.8 % deep, which the fit identifies as 12.6 % copper.
+But in the brass standard the copper is *not* found, because zinc-67 has
+a resonance at 223.11 eV and the two are only 6.93 eV apart, against a
+resolution of 4.35 eV. They merge into a single feature that bottoms out
+at 226 eV, and the fit cannot separate them. Fitting the resonances and
+the continuum separately does recover copper in brass, with a resonance
+areal density of 0.0157 against 0.0049 for zinc.
+
+> [!WARNING]
+> The separated fit reports a large lead abundance in every sample. That
+> is an artefact: the "resonance part" of the lead cross-section is
+> essentially flat, so a large coefficient on it produces almost no
+> optical thickness and is left unconstrained. The plain fit does not
+> have this problem.

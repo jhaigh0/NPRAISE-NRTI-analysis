@@ -12,12 +12,16 @@ import numpy as np
 from data_manipulation.fit_endf import (
     ENDFfitResult,
     _atomic_mass,
+    _scaled_start,
+    _simplex_from_stick,
+    _stick_jacobian,
     fit_region,
     fit_regions,
     main,
 )
 from endf_database_util.local_endf import find_database_root
 from endf_database_util.templates import (
+    ElementTemplate,
     TemplateSet,
     build_fine_templates,
     build_templates,
@@ -323,6 +327,73 @@ class FitRegionTests(unittest.TestCase):
             fit_region(profile, ["A", "B"], templates=templates)
 
 
+class OptimiserTests(unittest.TestCase):
+    """Tests for the optimiser, which has to cope with many candidates."""
+
+    def test_the_stick_jacobian_matches_the_stick_parameters(self):
+        """The analytic stick Jacobian agrees with a numerical one."""
+        parameters = np.array([0.2, 0.5, 0.3, 0.8])
+        analytic = _stick_jacobian(parameters)
+        numerical = np.zeros_like(analytic)
+        for index in range(parameters.size):
+            step = 1e-7
+            higher = parameters.copy()
+            higher[index] += step
+            lower = parameters.copy()
+            lower[index] -= step
+            numerical[:, index] = (
+                _simplex_from_stick(higher) - _simplex_from_stick(lower)
+            ) / (2.0 * step)
+        np.testing.assert_allclose(analytic, numerical, atol=1e-6)
+
+    def test_the_scaled_start_has_a_sane_optical_thickness(self):
+        """The generic start does not saturate the transmission."""
+        design = np.ones((10, 50))
+        start = _scaled_start(design)
+        self.assertAlmostEqual(float(np.max(design @ start)), 1.0)
+
+    def test_a_fit_with_many_candidates_finishes(self):
+        """A fit with more candidates than the start-point limit works.
+
+        The single-element starts are only used for a small number of
+        elements, because each one costs a full fit. The generic starts
+        have to be enough on their own for a large number of candidates.
+
+        The cross-sections are narrow bumps in the upper half of the
+        energy range, so that the profile has a median of one and the
+        normalisation of the measured transmission does not change it.
+        """
+        energies = np.linspace(1.0, 500.0, 120)
+        templates = TemplateSet(
+            energies=energies,
+            templates={},
+            measurement_energies=None,
+        )
+        symbols = [f"X{index}" for index in range(40)]
+        for index, symbol in enumerate(symbols):
+            centre = 260.0 + 6.0 * index
+            sigma = np.exp(-(((energies - centre) / 4.0) ** 2))
+            sigma[energies < 250.0] = 0.0
+            templates.templates[symbol] = ElementTemplate(
+                symbol=symbol,
+                isotopes=[],
+                abundances={},
+                energies=energies,
+                cross_section=sigma,
+            )
+        truth = np.zeros(len(symbols))
+        truth[3] = 1.0
+        truth[17] = 0.5
+        matrix = np.column_stack(
+            [templates.templates[s].cross_section for s in symbols]
+        )
+        profile = np.exp(-(matrix @ truth))
+        result = fit_region(profile, symbols, templates=templates)
+        self.assertLess(result.rms_residual, 1e-3)
+        self.assertGreater(result.fractions[3], 0.5)
+        self.assertGreater(result.fractions[17], 0.1)
+
+
 class FloorTests(unittest.TestCase):
     """Tests for the treatment of a saturated dip."""
 
@@ -588,6 +659,35 @@ class CommandLineTests(unittest.TestCase):
 
     def test_no_elements_is_an_error(self):
         self.assertEqual(main(["--dictionary", str(DICTIONARY)]), 1)
+
+    def test_discover_cannot_be_combined_with_elements(self):
+        """The candidates and an explicit list cannot both be given."""
+        self.assertEqual(
+            main(
+                [
+                    "--dictionary",
+                    str(DICTIONARY),
+                    "--discover",
+                    "--elements",
+                    "Cu",
+                ]
+            ),
+            1,
+        )
+
+    def test_discover_and_discover_isotopes_cannot_both_be_given(self):
+        """The element and isotope routes are separate."""
+        self.assertEqual(
+            main(
+                [
+                    "--dictionary",
+                    str(DICTIONARY),
+                    "--discover",
+                    "--discover-isotopes",
+                ]
+            ),
+            1,
+        )
 
     def test_a_missing_dictionary_is_an_error(self):
         self.assertEqual(

@@ -104,6 +104,15 @@ DEFAULT_CONTINUUM_WIDTH = 0.25
 # little, because the noise there is large.
 _UNSATURATED_THRESHOLD = 3.0
 
+# The largest number of start points that are tried for a fit. The fit is
+# started from several points, because the exponential model has local
+# minima, and one of the starts puts all the weight on a single element.
+# That is a sensible thing to do for a handful of elements, but it costs
+# one full fit per element, so with hundreds of candidates it becomes the
+# dominant cost. Above this many elements only the generic starts are
+# used, which is enough because the elements are then well separated.
+_MAX_STARTS = 32
+
 
 @dataclass
 class ENDFfitResult:
@@ -417,6 +426,92 @@ def _stick_from_simplex(weights: np.ndarray) -> np.ndarray:
         parameters[index] = weights[index] / remainder if remainder > 0 else 0.0
         remainder -= weights[index]
     return parameters
+
+
+def _scaled_start(design: np.ndarray) -> np.ndarray:
+    """A start that puts every element in the sample, at a sane scale.
+
+    The templates are scaled to unit maximum, so a coefficient of one
+    means one unit of optical thickness at the peak of that element's
+    cross-section. Giving every element a coefficient of one therefore
+    makes the total optical thickness the sum of all the columns, which
+    for a large number of candidates is so large that the transmission
+    underflows to zero. The gradient then vanishes and the optimiser
+    stalls.
+
+    The start is scaled so that the total optical thickness is of order
+    one, which is the physical scale of a sample that is a few percent
+    opaque.
+
+    Parameters
+    ----------
+    design : numpy.ndarray
+        The design matrix, one column per element.
+
+    Returns:
+        The starting coefficients.
+    """
+    n_columns = design.shape[1]
+    if n_columns == 0:
+        return np.zeros(0, dtype=float)
+    # The largest optical thickness that the start produces, which is
+    # what has to be brought down to order one.
+    peak = float(np.max(design.sum(axis=1))) if design.size else 0.0
+    if peak <= 0.0:
+        return np.ones(n_columns, dtype=float)
+    return np.full(n_columns, 1.0 / peak, dtype=float)
+
+
+def _stick_jacobian(u: np.ndarray) -> np.ndarray:
+    """The Jacobian of :func:`_simplex_from_stick` with respect to ``u``.
+
+    The stick-breaking parameters are turned into weights by taking a
+    fraction of what is left at each step, so the weight of element *i*
+    depends on every parameter up to and including its own.
+
+    Writing the remainder before step *i* as ``R_i``, the weights are
+    ``w_i = R_i u_i`` and the last weight is ``R_n``. The derivative of
+    ``w_i`` with respect to ``u_j`` is therefore
+
+    * ``R_i`` when ``j == i``,
+    * ``-u_i R_i / (1 - u_j)`` when ``j < i``,
+    * zero when ``j > i``.
+
+    Parameters
+    ----------
+    u : numpy.ndarray
+        The stick-breaking parameters.
+
+    Returns:
+        An array of shape ``(len(u) + 1, len(u))``, whose entry ``[i, j]``
+        is the derivative of weight *i* with respect to parameter *j*.
+    """
+    u = np.asarray(u, dtype=float)
+    n_parameters = u.size
+    jacobian = np.zeros((n_parameters + 1, n_parameters), dtype=float)
+    if n_parameters == 0:
+        return jacobian
+
+    # The remainder before each step is the product of (1 - u) over all
+    # the earlier parameters.
+    remainders = np.ones(n_parameters + 1, dtype=float)
+    for index in range(n_parameters):
+        remainders[index + 1] = remainders[index] * (1.0 - u[index])
+
+    # The factors (1 - u) are non-zero in practice, because a parameter
+    # of one would leave nothing for the elements after it. The division
+    # is guarded anyway, so that a degenerate start does not produce a
+    # NaN.
+    factors = np.where(np.abs(1.0 - u) > 1e-12, 1.0 - u, 1.0)
+
+    for index in range(n_parameters):
+        jacobian[index, index] = remainders[index]
+        earlier = np.arange(index)
+        jacobian[index, earlier] = -u[index] * remainders[index] / factors[earlier]
+    # The last weight is the remainder itself, so it depends on every
+    # parameter.
+    jacobian[n_parameters, :] = -remainders[n_parameters] / factors
+    return jacobian
 
 
 def _mass_fractions(
@@ -1002,10 +1097,47 @@ def fit_region(
             modelled = floor + (1.0 - floor) * np.exp(-optical_thickness)
             return modelled[usable] - measured[usable]
 
+        def jacobian(
+            coefficients: np.ndarray,
+            design: np.ndarray = design,
+            total_areal_density: float | None = total_areal_density,
+        ) -> np.ndarray:
+            """The analytic Jacobian of the residual.
+
+            The model is ``floor + (1 - floor) * exp(-A c)``, so the
+            derivative with respect to the coefficient of column *j* is
+            ``-(1 - floor) * exp(-A c) * A[:, j]``. Supplying this to the
+            optimiser saves one model evaluation per parameter per
+            iteration, which is what makes a fit with hundreds of
+            candidates practical.
+
+            When the amount of material is fixed, the coefficients are
+            stick-breaking parameters, so the chain rule through
+            :func:`_simplex_from_stick` is applied as well.
+            """
+            if total_areal_density is not None:
+                fractions = _simplex_from_stick(coefficients)
+                optical_thickness = total_areal_density * (design @ fractions)
+                # d(optical thickness)/d(coefficient) is the design matrix
+                # scaled by the amount of material and by the Jacobian of
+                # the stick-breaking parameters.
+                scaled = total_areal_density * (design @ _stick_jacobian(coefficients))
+            else:
+                optical_thickness = design @ coefficients
+                scaled = design
+            decay = np.exp(-optical_thickness)[usable]
+            return (-(1.0 - floor) * decay)[:, None] * scaled[usable]
+
         # The fit is started from several points, because the exponential
         # model has local minima and a single start can settle in the wrong
         # one. The starts are the all-zero vector, the all-ones vector, and
         # one that puts all the weight on a single element in turn.
+        #
+        # The single-element starts cost one full fit each, so they are
+        # only used when there are few enough elements for that to be
+        # cheap. With many candidates the generic starts are used on their
+        # own, which is enough because the candidates are then well
+        # separated from each other.
         n_columns = design.shape[1]
         if fixed_amount is not None:
             # The coefficients are stick-breaking parameters, so they are
@@ -1019,10 +1151,11 @@ def fit_region(
                 np.zeros(n_elements - 1),
                 np.ones(n_elements - 1),
             ]
-            for index in range(n_elements - 1):
-                single = np.zeros(n_elements - 1)
-                single[index] = 1.0
-                starts.append(single)
+            if n_elements - 1 <= _MAX_STARTS:
+                for index in range(n_elements - 1):
+                    single = np.zeros(n_elements - 1)
+                    single[index] = 1.0
+                    starts.append(single)
         elif fixed_composition is not None:
             # The single coefficient is the optical thickness at the peak of
             # the weighted cross-section, which is of the order of the
@@ -1030,14 +1163,23 @@ def fit_region(
             # that is physically sensible.
             starts = [np.array([value]) for value in (0.1, 1.0, 10.0, 100.0, 1000.0)]
         else:
-            starts = [np.zeros(n_columns), np.ones(n_columns)]
-            for index in range(len(fitted_symbols)):
-                single = np.zeros(n_columns)
-                if separate_continuum:
-                    single[2 * index] = 1.0
-                else:
-                    single[index] = 1.0
-                starts.append(single)
+            # The all-ones start puts every element in the sample, but the
+            # templates are scaled to unit maximum, so the optical
+            # thickness of that start is the sum of all the columns. With
+            # many candidates that is a huge number, the transmission
+            # underflows to zero, the gradient vanishes, and the optimiser
+            # stalls. The start is therefore scaled so that the total
+            # optical thickness is of order one, which is the physical
+            # scale of a sample that is a few percent opaque.
+            starts = [np.zeros(n_columns), _scaled_start(design)]
+            if len(fitted_symbols) <= _MAX_STARTS:
+                for index in range(len(fitted_symbols)):
+                    single = np.zeros(n_columns)
+                    if separate_continuum:
+                        single[2 * index] = 1.0
+                    else:
+                        single[index] = 1.0
+                    starts.append(single)
 
         if separate_continuum:
             # The split fit has many more parameters than the plain one,
@@ -1058,6 +1200,12 @@ def fit_region(
                 optical_thickness = plain_design @ coefficients
                 return floor + (1.0 - floor) * np.exp(-optical_thickness) - measured
 
+            def plain_jacobian(
+                coefficients: np.ndarray, plain_design: np.ndarray = plain_design
+            ) -> np.ndarray:
+                decay = np.exp(-(plain_design @ coefficients))
+                return (-(1.0 - floor) * decay)[:, None] * plain_design
+
             plain_best = None
             for plain_start in (
                 np.zeros(len(fitted_symbols)),
@@ -1066,6 +1214,7 @@ def fit_region(
                 solution = least_squares(
                     plain_residual,
                     plain_start,
+                    jac=plain_jacobian,
                     bounds=(0.0, np.inf),
                     method="trf",
                     xtol=1e-14,
@@ -1097,6 +1246,7 @@ def fit_region(
             solution = least_squares(
                 residual,
                 start,
+                jac=jacobian,
                 bounds=bounds,
                 method="trf",
                 xtol=1e-14,
@@ -1584,6 +1734,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Path of the CSV file to write the results to.",
     )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help=(
+            "Fit every element that could be present in the sample, rather "
+            "than a list given on the command line. The candidates are "
+            "the elements that have a resonance in the measured energy "
+            "range and a natural abundance, which the energy range alone "
+            "reduces to about sixty."
+        ),
+    )
+    parser.add_argument(
+        "--discover-isotopes",
+        action="store_true",
+        help=(
+            "Fit every isotope that could be present in the sample, rather "
+            "than a list given on the command line. This is the same as "
+            "--discover, but at the level of isotopes rather than "
+            "elements."
+        ),
+    )
+    parser.add_argument(
+        "--min-energy",
+        type=float,
+        default=1.0,
+        help=("The lower edge of the energy range used by --discover, in eV."),
+    )
+    parser.add_argument(
+        "--max-energy",
+        type=float,
+        default=500.0,
+        help=("The upper edge of the energy range used by --discover, in eV."),
+    )
     args = parser.parse_args(argv)
 
     # The fit needs a profile and an energy grid. They can come from a
@@ -1653,9 +1836,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
     entries = list(args.isotopes) if args.isotopes else list(args.elements or [])
+
+    # In discovery mode the candidates are not given on the command line.
+    # They are the elements, or the isotopes, that have a resonance in the
+    # measured energy range and a natural abundance. The energy range
+    # alone reduces the database to a few dozen candidates, so the fit
+    # stays quick even though every option is left open.
+    if args.discover or args.discover_isotopes:
+        if args.discover and args.discover_isotopes:
+            print(
+                "Error: --discover and --discover-isotopes cannot both be given.",
+                file=sys.stderr,
+            )
+            return 1
+        if entries:
+            print(
+                "Error: --discover cannot be combined with --elements or --isotopes.",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            from endf_database_util.discovery import scan_database
+
+            discovered = scan_database(args.min_energy, args.max_energy)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            print(f"Error: could not scan the database: {exc}", file=sys.stderr)
+            return 2
+        entries = discovered.isotopes if args.discover_isotopes else discovered.elements
+        level = "isotopes" if args.discover_isotopes else "elements"
+        print(
+            f"Found {len(entries)} candidate {level} with a resonance "
+            f"between {args.min_energy:g} and {args.max_energy:g} eV.",
+            file=sys.stderr,
+        )
+
     if not entries:
         print(
-            "Error: either --elements or --isotopes must be given.",
+            "Error: either --elements, --isotopes or --discover must be given.",
             file=sys.stderr,
         )
         return 1
